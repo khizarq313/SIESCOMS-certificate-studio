@@ -1,18 +1,10 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/index.ts",
-      "use": "@vercel/node",
-      "config": {
-        "includeFiles": ["assets/**", "fonts/**"]
-      }
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "assets/**, fonts/**, fonts.css, public/**"
     }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "api/index.ts"
-    }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index" }
   ]
 }

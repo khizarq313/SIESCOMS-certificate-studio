@@ -12,6 +12,7 @@ import { renderer } from '../render/renderer';
 import { buildMessage, createMailer, friendlyMailError, type Mailer } from '../services/emailService';
 import { FILES_DIR, GENERATED_DIR, safePath } from '../utils/fileStorage';
 import { MAX_ROWS } from '../services/excelParser';
+import { getDb } from '../storage/db';
 
 const cell = z.string().max(2000);
 export const JobRequestSchema = z.object({
@@ -49,7 +50,37 @@ export interface Job {
 const jobs = new Map<string, Job>();
 const CONCURRENCY = Math.max(1, Number(process.env.RENDER_PAGES || 3));
 
-export const getJob = (id: string) => jobs.get(id);
+export async function persistJob(job: Job): Promise<void> {
+  jobs.set(job.id, job);
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.collection('jobs').updateOne({ id: job.id }, { $set: job }, { upsert: true });
+    } catch {}
+  }
+}
+
+export async function getJob(id: string): Promise<Job | undefined> {
+  const local = jobs.get(id);
+  if (local) return local;
+
+  const db = await getDb();
+  if (db) {
+    try {
+      const doc = await db.collection<Job>('jobs').findOne({ id }, { projection: { _id: 0 } });
+      if (doc) {
+        jobs.set(doc.id, doc);
+        return doc;
+      }
+    } catch (err) {
+      console.warn('Failed to get job from MongoDB:', err);
+    }
+  }
+  return undefined;
+}
+
+/** Synchronous local cache accessor for internal usage */
+export const getJobSync = (id: string): Job | undefined => jobs.get(id);
 
 /** Public view of a job; `since` skips results the browser already has. */
 export function jobView(job: Job, since = 0) {
@@ -125,9 +156,15 @@ async function runDownload(job: Job, req: JobRequest) {
       job.results.push({ i, name, detail: (err as Error).message, ok: false });
     }
     job.done++;
+    persistJob(job).catch(() => {});
   });
 
-  if (job.cancel) { archive?.abort(); fs.rmSync(outPath, { force: true }); return; }
+  if (job.cancel) {
+    archive?.abort();
+    fs.rmSync(outPath, { force: true });
+    await persistJob(job);
+    return;
+  }
   if (archive) {
     await archive.finalize();
     await finished;
@@ -145,6 +182,7 @@ async function runDownload(job: Job, req: JobRequest) {
     fs.writeFileSync(outPath, await doc.save());
   }
   job.file = { path: outPath, name: outName };
+  await persistJob(job);
 }
 
 async function runEmail(job: Job, req: JobRequest) {
@@ -163,6 +201,7 @@ async function runEmail(job: Job, req: JobRequest) {
       if (!to || !emailOk(to)) {
         job.results.push({ i, name, detail: to ? `${to} · invalid address` : 'No email address', ok: false });
         job.done++;
+        persistJob(job).catch(() => {});
         return;
       }
       try {
@@ -178,9 +217,11 @@ async function runEmail(job: Job, req: JobRequest) {
         job.results.push({ i, name, detail: `${to} · ${friendlyMailError(err)}`, ok: false });
       }
       job.done++;
+      persistJob(job).catch(() => {});
     });
   } finally {
     mailer?.close();
+    await persistJob(job);
   }
 }
 
@@ -189,11 +230,11 @@ export function startJob(req: JobRequest): Job {
     id: crypto.randomUUID(), kind: req.delivery, total: req.rows.length, done: 0, status: 'running', error: '',
     results: [], testOnly: false, createdAt: Date.now(), cancel: false,
   };
-  jobs.set(job.id, job);
+  persistJob(job).catch(() => {});
   const run = req.delivery === 'email' ? runEmail(job, req) : runDownload(job, req);
   run.then(
-    () => { job.status = job.cancel ? 'cancelled' : 'done'; },
-    (err) => { job.status = 'failed'; job.error = friendlyError(err); console.error('Job failed:', err); },
+    () => { job.status = job.cancel ? 'cancelled' : 'done'; persistJob(job).catch(() => {}); },
+    (err) => { job.status = 'failed'; job.error = friendlyError(err); console.error('Job failed:', err); persistJob(job).catch(() => {}); },
   );
   return job;
 }
@@ -212,11 +253,19 @@ export function reportCsv(job: Job): string {
 }
 
 /** Forget jobs and delete their files after a day. */
-export function sweepJobs(maxAgeMs = 24 * 3600_000) {
+export async function sweepJobs(maxAgeMs = 24 * 3600_000) {
   const now = Date.now();
   for (const [id, job] of jobs) {
     if (now - job.createdAt < maxAgeMs || job.status === 'running') continue;
-    if (job.file) fs.rmSync(job.file.path, { force: true });
+    if (job.file) {
+      try { fs.rmSync(job.file.path, { force: true }); } catch {}
+    }
     jobs.delete(id);
+  }
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.collection('jobs').deleteMany({ createdAt: { $lt: now - maxAgeMs }, status: { $ne: 'running' } });
+    } catch {}
   }
 }

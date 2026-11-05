@@ -1,26 +1,54 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const rootPkg = path.resolve(process.cwd(), '../../packages/certificate');
-const localAssets = path.resolve(process.cwd(), 'assets');
-const localFonts = path.resolve(process.cwd(), 'fonts');
+// Locate packages/certificate
+const candidates = [
+  path.resolve(process.cwd(), '../../packages/certificate'),
+  path.resolve(process.cwd(), '../packages/certificate'),
+  path.resolve(process.cwd(), 'packages/certificate'),
+  path.resolve(process.cwd(), 'node_modules/@siescoms/certificate'),
+];
 
-try {
-  if (fs.existsSync(rootPkg)) {
-    const assetsSrc = path.join(rootPkg, 'assets');
-    const fontsSrc = path.join(rootPkg, 'fonts');
-    if (fs.existsSync(assetsSrc)) {
-      fs.cpSync(assetsSrc, localAssets, { recursive: true });
-      console.log('✓ Copied certificate assets to apps/api/assets');
-    }
-    if (fs.existsSync(fontsSrc)) {
-      fs.cpSync(fontsSrc, localFonts, { recursive: true });
-      console.log('✓ Copied certificate fonts to apps/api/fonts');
+const rootPkg = candidates.find(
+  (c) => fs.existsSync(path.join(c, 'assets')) && fs.existsSync(path.join(c, 'fonts'))
+);
+
+if (rootPkg) {
+  console.log(`✓ Found certificate package at ${rootPkg}`);
+
+  // Copy assets and fonts to local and public directories
+  const copies = [
+    { src: path.join(rootPkg, 'assets'), dest: path.resolve(process.cwd(), 'assets') },
+    { src: path.join(rootPkg, 'fonts'), dest: path.resolve(process.cwd(), 'fonts') },
+    { src: path.join(rootPkg, 'assets'), dest: path.resolve(process.cwd(), 'public/static/assets') },
+    { src: path.join(rootPkg, 'fonts'), dest: path.resolve(process.cwd(), 'public/static/fonts') },
+    { src: path.join(rootPkg, 'assets'), dest: path.resolve(process.cwd(), 'public/assets') },
+    { src: path.join(rootPkg, 'fonts'), dest: path.resolve(process.cwd(), 'public/fonts') },
+  ];
+
+  for (const { src, dest } of copies) {
+    if (fs.existsSync(src)) {
+      fs.mkdirSync(dest, { recursive: true });
+      fs.cpSync(src, dest, { recursive: true });
     }
   }
-} catch (err) {
-  console.warn('Warning: Could not copy static assets during build:', err);
+
+  // Copy fonts.css
+  const fontsCssSrc = path.join(rootPkg, 'fonts.css');
+  if (fs.existsSync(fontsCssSrc)) {
+    const cssDests = [
+      path.resolve(process.cwd(), 'fonts.css'),
+      path.resolve(process.cwd(), 'public/fonts.css'),
+      path.resolve(process.cwd(), 'public/static/fonts.css'),
+    ];
+    for (const dest of cssDests) {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(fontsCssSrc, dest);
+    }
+    console.log('✓ Copied fonts.css');
+  }
+} else {
+  console.warn('⚠ Could not locate packages/certificate static assets');
 }
 
-console.log('✓ SIESCOMS API build ready for Vercel.');
-
+console.log('✓ SIESCOMS API build assets and fonts ready for Vercel.');

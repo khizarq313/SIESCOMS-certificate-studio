@@ -2,6 +2,8 @@
   "name": "@siescoms/api",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
+  "main": "src/index.ts",
   "scripts": {
     "dev": "tsx watch --clear-screen=false src/index.ts",
     "build": "node scripts/build.mjs",
@@ -17,6 +19,7 @@
     "express": "^4.21.2",
     "express-rate-limit": "^8.7.3",
     "helmet": "^8.0.0",
+    "mongodb": "^7.8.0",
     "multer": "^2.5.0",
     "nodemailer": "^10.3.1",
     "pdf-lib": "^1.17.1",
@@ -38,6 +41,7 @@
     "@types/react-dom": "^19.0.0",
     "@types/supertest": "^6.0.2",
     "supertest": "^7.0.0",
+    "vite": "^6.4.5",
     "vitest": "^5.1.0"
   }
 }

@@ -48,18 +48,80 @@ async function waitForJob(id: string) {
   throw new Error('job timed out');
 }
 
+let token = '';
+
 beforeAll(async () => {
   const r = await request(app).post('/api/auth/login').send({ password: 'test-pass' });
   cookie = String(r.headers['set-cookie']).split(';')[0];
+  token = r.body.token;
 });
 afterAll(async () => {
   await renderer.close();
   fs.rmSync(process.env.UPLOADS_DIR!, { recursive: true, force: true });
 });
 
+describe('health and diagnostics', () => {
+  it('responds on root and health endpoints', async () => {
+    const root = await request(app).get('/');
+    expect(root.status).toBe(200);
+    expect(root.body.ok).toBe(true);
+
+    const apiRoot = await request(app).get('/api');
+    expect(apiRoot.status).toBe(200);
+    expect(apiRoot.body.ok).toBe(true);
+
+    const health = await request(app).get('/health');
+    expect(health.status).toBe(200);
+    expect(health.body.ok).toBe(true);
+
+    const apiHealth = await request(app).get('/api/health');
+    expect(apiHealth.status).toBe(200);
+    expect(apiHealth.body.ok).toBe(true);
+
+    const readiness = await request(app).get('/api/readiness');
+    expect(readiness.status).toBe(200);
+    expect(readiness.body.ok).toBe(true);
+    expect(readiness.body.status).toBe('ready');
+  });
+});
+
+describe('static assets and font styles', () => {
+  it('serves fonts.css at /api/static/fonts.css and /static/fonts.css', async () => {
+    const r1 = await request(app).get('/api/static/fonts.css');
+    expect(r1.status).toBe(200);
+    expect(r1.headers['content-type']).toContain('text/css');
+    expect(r1.text).toContain('@font-face');
+
+    const r2 = await request(app).get('/static/fonts.css');
+    expect(r2.status).toBe(200);
+    expect(r2.headers['content-type']).toContain('text/css');
+  });
+
+  it('serves certificate static assets', async () => {
+    const sun = await request(app).get('/api/static/assets/sun.svg');
+    expect(sun.status).toBe(200);
+
+    const badge = await request(app).get('/api/static/assets/badge.png');
+    expect(badge.status).toBe(200);
+  });
+});
+
 describe('sign-in', () => {
   it('blocks the API without a session', async () => {
     expect((await request(app).get('/api/designs')).status).toBe(401);
+  });
+  it('checks session state via /api/auth/me', async () => {
+    const unauth = await request(app).get('/api/auth/me');
+    expect(unauth.status).toBe(200);
+    expect(unauth.body.signedIn).toBe(false);
+
+    const authed = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(authed.status).toBe(200);
+    expect(authed.body.signedIn).toBe(true);
+  });
+  it('authenticates with Bearer token header', async () => {
+    const r = await request(app).get('/api/designs').set('Authorization', `Bearer ${token}`);
+    expect(r.status).toBe(200);
   });
   it('rejects a wrong password', async () => {
     expect((await request(app).post('/api/auth/login').send({ password: 'nope' })).status).toBe(401);
@@ -201,5 +263,41 @@ describe('email content', () => {
     expect(m.html).not.toContain('<script>');
     expect(m.html).toContain('&lt;script&gt;');
     expect(m.subject).not.toMatch(/[\r\n]/);
+  });
+});
+
+describe('design management', () => {
+  it('supports full lifecycle: create, list, read, update, delete', async () => {
+    const d = designWithName();
+    // 1. Create
+    const created = await request(app).post('/api/designs').set('Cookie', cookie).send({ design: d });
+    expect(created.status).toBe(200);
+    const id = created.body.id;
+    expect(id).toBeTruthy();
+
+    // 2. Read
+    const fetched = await request(app).get(`/api/designs/${id}`).set('Cookie', cookie);
+    expect(fetched.status).toBe(200);
+    expect(fetched.body.design.name).toBe(d.name);
+
+    // 3. List
+    const list = await request(app).get('/api/designs').set('Cookie', cookie);
+    expect(list.status).toBe(200);
+    expect(list.body.some((x: { id: string }) => x.id === id)).toBe(true);
+
+    // 4. Update
+    const updatedDesign = { ...d, name: 'Renamed Design' };
+    const updated = await request(app).put(`/api/designs/${id}`).set('Cookie', cookie).send({ design: updatedDesign });
+    expect(updated.status).toBe(200);
+    expect(updated.body.design.name).toBe('Renamed Design');
+
+    // 5. Delete
+    const deleted = await request(app).delete(`/api/designs/${id}`).set('Cookie', cookie);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.ok).toBe(true);
+
+    // Verify 404 after delete
+    const postDelete = await request(app).get(`/api/designs/${id}`).set('Cookie', cookie);
+    expect(postDelete.status).toBe(404);
   });
 });
