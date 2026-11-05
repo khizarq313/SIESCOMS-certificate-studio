@@ -14,5 +14,5 @@
       "@siescoms/certificate/*": ["../../packages/certificate/*"]
     }
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests", "api"]
 }

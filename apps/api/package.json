@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch --clear-screen=false src/index.ts",
+    "build": "node -e \"console.log('SIESCOMS API build ready.')\"",
     "start": "NODE_ENV=production tsx src/index.ts",
     "setup:browser": "playwright install chromium",
     "test": "vitest run",

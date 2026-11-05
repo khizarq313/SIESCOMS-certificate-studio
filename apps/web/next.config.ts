@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next';
 
-const API = process.env.API_URL || 'http://127.0.0.1:4000';
+const rawApi = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+const API = rawApi.replace(/\/+$/, '');
 
 const config: NextConfig = {
   transpilePackages: ['@siescoms/certificate'],

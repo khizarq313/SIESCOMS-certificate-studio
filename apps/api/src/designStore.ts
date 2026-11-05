@@ -6,7 +6,11 @@ import { DesignSchema, type Design } from '@siescoms/certificate';
 import { UPLOADS_ROOT, safePath } from './utils/fileStorage';
 
 const DIR = path.join(UPLOADS_ROOT, 'designs');
-fs.mkdirSync(DIR, { recursive: true });
+try {
+  fs.mkdirSync(DIR, { recursive: true });
+} catch (err) {
+  console.warn(`Could not create designs directory ${DIR}:`, err);
+}
 
 export interface StoredDesign { id: string; updatedAt: string; design: Design }
 

@@ -187,23 +187,37 @@ All settings load from the root **`.env`** file:
 
 ---
 
-## 6. Deployment Guide
+## 6. Vercel Deployment Guide (Deploying API & Web Separately)
 
-### Deploying the Frontend on Vercel
-1. Push this repository to GitHub.
-2. In the [Vercel Dashboard](https://vercel.com/), click **Add New Project** and select `SIESCOMS-certificate-studio`.
-3. The repository includes [`vercel.json`](file:///C:/Hard-Drive/Programming/Projects/SIESCOMS-certificate-studio/vercel.json), which automatically instructs Vercel to:
-   - Build Command: `npm run build`
-   - Output Directory: `apps/web/.next`
-4. In **Project Settings > Environment Variables**, add:
-   - `API_URL`: The public URL of your deployed Express API backend (e.g. `https://api.yourdomain.com`).
+You can deploy `apps/api` and `apps/web` as two separate projects in Vercel.
+
+### Step 1: Deploy the Backend API (`apps/api`)
+1. In the [Vercel Dashboard](https://vercel.com/), click **Add New Project** and import the repository: `https://github.com/khizarq313/SIESCOMS-certificate-studio.git`.
+2. Under **Root Directory**, click **Edit** and choose `apps/api`.
+3. In **Environment Variables**, provide the following:
+   | Variable | Description | Example / Recommended Value |
+   | :--- | :--- | :--- |
+   | `APP_PASSWORD` | Master password used by college staff to sign in | `YourSecurePassword123` |
+   | `SESSION_SECRET` | 32-byte secret for session signing | Run: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+   | `SMTP_HOST` | Mail server host | `smtp.office365.com` (or `smtp.gmail.com`) |
+   | `SMTP_PORT` | Mail server port | `587` |
+   | `SMTP_USER` | Mail account username | `certificates@siescoms.edu` |
+   | `SMTP_PASS` | Mail account App Password | *Your generated 16-character App Password* |
+   | `SMTP_FROM` | Default outgoing sender name & address | `"SIES College of Management Studies <certificates@siescoms.edu>"` |
+   | `COOKIE_SAMESITE` | Cookie SameSite policy | `none` (for cross-domain HTTPS) or `lax` |
+4. Click **Deploy**. Vercel will run `npm run build` and launch the API serverless endpoints.
+5. Note your assigned deployment URL (e.g. `https://siescoms-certificate-studio-api.vercel.app`).
+
+### Step 2: Deploy the Frontend Web App (`apps/web`)
+1. In the Vercel Dashboard, click **Add New Project** and import the same repository again.
+2. Under **Root Directory**, click **Edit** and choose `apps/web`.
+3. Framework Preset will be automatically detected as **Next.js**.
+4. In **Environment Variables**, provide:
+   | Variable | Description | Example Value |
+   | :--- | :--- | :--- |
+   | `API_URL` | Deployed API backend URL (for Next.js rewrites proxy) | `https://siescoms-certificate-studio-api.vercel.app` |
+   | `NEXT_PUBLIC_API_URL` | Optional fallback direct API URL | `https://siescoms-certificate-studio-api.vercel.app` |
 5. Click **Deploy**.
-
-### Deploying the Backend (API)
-Deploy `apps/api` on any Node.js hosting platform (Render, Railway, Fly.io, or VPS):
-- Build Command: `npm install`
-- Start Command: `npm -w @siescoms/api run start`
-- Provide `.env` variables (`APP_PASSWORD`, `SESSION_SECRET`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`).
 
 ---
 

@@ -2,6 +2,7 @@
 // for the editor background and for picking cover-patch colours. The server
 // still prints from the original vector file.
 import type { Background } from '@siescoms/certificate';
+import { resolveApiUrl } from './api';
 
 export interface RenderedBackground { url: string; canvas: HTMLCanvasElement }
 const cache = new Map<string, Promise<RenderedBackground>>();
@@ -9,7 +10,7 @@ const cache = new Map<string, Promise<RenderedBackground>>();
 async function renderPdfPage(fileKey: string, pageIndex: number): Promise<HTMLCanvasElement> {
   const pdfjs = await import('pdfjs-dist');
   pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
-  const task = pdfjs.getDocument({ url: `/api/files/${fileKey}`, withCredentials: true });
+  const task = pdfjs.getDocument({ url: resolveApiUrl(`/api/files/${fileKey}`), withCredentials: true });
   const doc = await task.promise;
   const page = await doc.getPage(pageIndex + 1);
   const base = page.getViewport({ scale: 1 });
@@ -24,7 +25,7 @@ async function renderPdfPage(fileKey: string, pageIndex: number): Promise<HTMLCa
 
 async function renderImage(fileKey: string): Promise<HTMLCanvasElement> {
   const img = new Image();
-  img.src = `/api/files/${fileKey}`;
+  img.src = resolveApiUrl(`/api/files/${fileKey}`);
   await img.decode();
   const canvas = document.createElement('canvas');
   canvas.width = img.naturalWidth;

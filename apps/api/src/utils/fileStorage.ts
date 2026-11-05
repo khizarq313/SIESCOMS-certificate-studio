@@ -1,13 +1,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const UPLOADS_ROOT = process.env.UPLOADS_DIR || path.resolve(__dirname, '../../uploads');
+const isVercel = Boolean(process.env.VERCEL);
+export const UPLOADS_ROOT = process.env.UPLOADS_DIR || (isVercel ? '/tmp/siescoms-uploads' : path.resolve(__dirname, '../../uploads'));
 /** Uploaded certificate backgrounds, signatures and logos. */
 export const FILES_DIR = path.join(UPLOADS_ROOT, 'files');
 /** Finished PDFs and ZIPs, deleted after a day. */
 export const GENERATED_DIR = path.join(UPLOADS_ROOT, 'generated');
 
-for (const dir of [FILES_DIR, GENERATED_DIR]) fs.mkdirSync(dir, { recursive: true });
+for (const dir of [FILES_DIR, GENERATED_DIR]) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    console.warn(`Could not create storage directory ${dir}:`, err);
+  }
+}
 
 /** Resolves a stored file name inside `dir`, refusing anything that could escape it. */
 export function safePath(dir: string, fileName: string): string {

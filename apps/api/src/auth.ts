@@ -32,8 +32,15 @@ function passwordMatches(input: string): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
+function extractToken(req: Request): string | undefined {
+  if (req.cookies?.[COOKIE]) return req.cookies[COOKIE];
+  const auth = req.headers.authorization;
+  if (auth && auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  return undefined;
+}
+
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  if (validToken(req.cookies?.[COOKIE])) return next();
+  if (validToken(extractToken(req))) return next();
   res.status(401).json({ error: 'Please sign in.' });
 }
 
@@ -44,9 +51,28 @@ authRouter.post('/login', rateLimit({ windowMs: 15 * 60_000, limit: 20, standard
     if (!env.appPassword) { res.status(500).json({ error: 'APP_PASSWORD is not set on the server.' }); return; }
     const pw = typeof req.body?.password === 'string' ? req.body.password : '';
     if (!passwordMatches(pw)) { res.status(401).json({ error: "That password isn't right." }); return; }
-    res.cookie(COOKIE, makeToken(), { httpOnly: true, sameSite: 'lax', secure: env.isProd && process.env.COOKIE_SECURE !== 'false', maxAge: MAX_AGE_MS, path: '/' });
-    res.json({ ok: true });
+    const token = makeToken();
+    const isCrossDomain = process.env.COOKIE_SAMESITE === 'none' || (process.env.NODE_ENV === 'production' && process.env.COOKIE_SAMESITE !== 'lax');
+    res.cookie(COOKIE, token, {
+      httpOnly: true,
+      sameSite: isCrossDomain ? 'none' : 'lax',
+      secure: isCrossDomain || (env.isProd && process.env.COOKIE_SECURE !== 'false'),
+      maxAge: MAX_AGE_MS,
+      path: '/'
+    });
+    res.json({ ok: true, token });
   });
 
-authRouter.post('/logout', (_req, res) => { res.clearCookie(COOKIE, { path: '/' }); res.json({ ok: true }); });
-authRouter.get('/me', (req, res) => { res.json({ signedIn: validToken(req.cookies?.[COOKIE]) }); });
+authRouter.post('/logout', (_req, res) => {
+  const isCrossDomain = process.env.COOKIE_SAMESITE === 'none' || (process.env.NODE_ENV === 'production' && process.env.COOKIE_SAMESITE !== 'lax');
+  res.clearCookie(COOKIE, {
+    path: '/',
+    sameSite: isCrossDomain ? 'none' : 'lax',
+    secure: isCrossDomain || (env.isProd && process.env.COOKIE_SECURE !== 'false'),
+  });
+  res.json({ ok: true });
+});
+
+authRouter.get('/me', (req, res) => {
+  res.json({ signedIn: validToken(extractToken(req)) });
+});

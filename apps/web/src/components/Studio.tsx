@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { api, type SavedDesign } from '@/lib/api';
+import { api, resolveApiUrl, setStoredToken, type SavedDesign } from '@/lib/api';
 import { STEP_SLUGS, useApp, type Step } from '@/lib/store';
 import { StartStep } from './start/StartStep';
 import { DesignStep } from './design/DesignStep';
@@ -17,7 +17,11 @@ function Header() {
   const maxStep = useApp((s) => s.maxStep);
   const go = useApp((s) => s.go);
   const saveState = useApp((s) => s.saveState);
-  const signOut = async () => { await api.send('/api/auth/logout', 'POST').catch(() => {}); location.href = '/login'; };
+  const signOut = async () => {
+    setStoredToken(null);
+    await api.send('/api/auth/logout', 'POST').catch(() => {});
+    location.href = '/login';
+  };
   return (
     <header className="header">
       <div
@@ -30,7 +34,7 @@ function Header() {
         style={{ cursor: 'pointer', userSelect: 'none' }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/api/static/assets/sun.svg" alt="SIES" />
+        <img src={resolveApiUrl('/api/static/assets/sun.svg')} alt="SIES" />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <span className="brand-name"><span className="brand-long">SIES College of Management Studies</span><span className="brand-short">SIES</span></span>
           <span className="brand-sub">Certificate Studio</span>

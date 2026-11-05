@@ -1,8 +1,14 @@
 import path from 'node:path';
 import fs from 'node:fs';
 
-// Load the single .env at the project root (or apps/api/.env) without a dependency.
-for (const file of [path.resolve(__dirname, '../../../../.env'), path.resolve(__dirname, '../../.env')]) {
+// Load .env at the project root (or apps/api/.env or current working directory) without a dependency.
+for (const file of [
+  path.resolve(__dirname, '../../../.env'),
+  path.resolve(__dirname, '../../../../.env'),
+  path.resolve(__dirname, '../../.env'),
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), '../../.env')
+]) {
   if (!fs.existsSync(file)) continue;
   for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
     const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);

@@ -1,12 +1,41 @@
-// Thin client for the Express API (proxied by Next at /api).
+// Thin client for the Express API (proxied by Next at /api or direct via NEXT_PUBLIC_API_URL).
 import type { Design, DetectedName } from '@siescoms/certificate';
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
 
+const PUBLIC_API = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '');
+
+export function resolveApiUrl(path: string): string {
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  if (!PUBLIC_API) return path;
+  if (PUBLIC_API.endsWith('/api') && path.startsWith('/api/')) {
+    return `${PUBLIC_API}${path.slice(4)}`;
+  }
+  return `${PUBLIC_API}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
+function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem('cc_auth_token');
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredToken(token: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (token) localStorage.setItem('cc_auth_token', token);
+    else localStorage.removeItem('cc_auth_token');
+  } catch {}
+}
+
 async function handle<T>(res: Response): Promise<T> {
   if (res.status === 401 && typeof window !== 'undefined' && !location.pathname.startsWith('/login')) {
+    setStoredToken(null);
     location.href = '/login';
   }
   const body = await res.json().catch(() => ({}));
@@ -14,23 +43,47 @@ async function handle<T>(res: Response): Promise<T> {
   return body as T;
 }
 
+function defaultHeaders(extra?: HeadersInit): HeadersInit {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = getStoredToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return { ...headers, ...(extra as Record<string, string>) };
+}
+
 export const api = {
-  get: <T>(url: string) => fetch(url, { credentials: 'same-origin' }).then((r) => handle<T>(r)),
+  get: <T>(url: string) =>
+    fetch(resolveApiUrl(url), {
+      credentials: 'include',
+      headers: defaultHeaders(),
+    }).then((r) => handle<T>(r)),
+
   send: <T>(url: string, method: 'POST' | 'PUT' | 'DELETE', body?: unknown) =>
-    fetch(url, { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }).then((r) => handle<T>(r)),
+    fetch(resolveApiUrl(url), {
+      method,
+      credentials: 'include',
+      headers: defaultHeaders(),
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then((r) => handle<T>(r)),
 };
 
 /** Upload with progress (fetch can't report upload progress). */
 export function uploadFile<T>(url: string, file: File, onProgress?: (pct: number) => void): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', url);
+    xhr.open('POST', resolveApiUrl(url));
     xhr.withCredentials = true;
+    const token = getStoredToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
     xhr.onload = () => {
       let body: { error?: string } = {};
       try { body = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
-      if (xhr.status === 401) { location.href = '/login'; return; }
+      if (xhr.status === 401) {
+        setStoredToken(null);
+        location.href = '/login';
+        return;
+      }
       if (xhr.status >= 200 && xhr.status < 300) resolve(body as T);
       else reject(new ApiError(body.error || (xhr.status === 413 ? 'That file is too big.' : 'The upload failed.'), xhr.status));
     };
