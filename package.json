@@ -1,0 +1,16 @@
+{
+  "name": "siescoms-certificate-studio",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm -w @siescoms/api run dev\" \"npm -w @siescoms/web run dev\"",
+    "build": "npm -w @siescoms/web run build",
+    "start": "concurrently -k -n api,web -c blue,green \"npm -w @siescoms/api run start\" \"npm -w @siescoms/web run start\"",
+    "test": "npm -w @siescoms/api run test",
+    "typecheck": "npm -w @siescoms/certificate run typecheck && npm -w @siescoms/api run typecheck && npm -w @siescoms/web run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}
