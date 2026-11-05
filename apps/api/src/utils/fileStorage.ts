@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+const baseDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 const isVercel = Boolean(process.env.VERCEL);
-export const UPLOADS_ROOT = process.env.UPLOADS_DIR || (isVercel ? '/tmp/siescoms-uploads' : path.resolve(__dirname, '../../uploads'));
+export const UPLOADS_ROOT = process.env.UPLOADS_DIR || (isVercel ? '/tmp/siescoms-uploads' : path.resolve(baseDir, '../../uploads'));
 /** Uploaded certificate backgrounds, signatures and logos. */
 export const FILES_DIR = path.join(UPLOADS_ROOT, 'files');
 /** Finished PDFs and ZIPs, deleted after a day. */

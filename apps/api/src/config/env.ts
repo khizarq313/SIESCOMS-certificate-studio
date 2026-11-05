@@ -1,11 +1,13 @@
 import path from 'node:path';
 import fs from 'node:fs';
 
+const baseDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
+
 // Load .env at the project root (or apps/api/.env or current working directory) without a dependency.
 for (const file of [
-  path.resolve(__dirname, '../../../.env'),
-  path.resolve(__dirname, '../../../../.env'),
-  path.resolve(__dirname, '../../.env'),
+  path.resolve(baseDir, '../../../.env'),
+  path.resolve(baseDir, '../../../../.env'),
+  path.resolve(baseDir, '../../.env'),
   path.resolve(process.cwd(), '.env'),
   path.resolve(process.cwd(), '../../.env')
 ]) {

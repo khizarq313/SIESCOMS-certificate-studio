@@ -41,16 +41,19 @@ export function createApp() {
   app.get('/', (_req, res) => {
     res.json({ name: 'SIESCOMS Certificate Studio API', status: 'online', ok: true });
   });
+  app.get('/api', (_req, res) => {
+    res.json({ name: 'SIESCOMS Certificate Studio API', status: 'online', ok: true });
+  });
   app.get('/health', (_req, res) => { res.json({ ok: true }); });
   app.get('/api/health', (_req, res) => { res.json({ ok: true }); });
 
   app.use('/api/auth', authRouter);
 
   // Built-in certificate art and fonts are public (served at both /api/static and /static)
-  app.use('/api/static/assets', express.static(path.join(PKG_DIR, 'assets'), { maxAge: '7d', fallthrough: false }));
-  app.use('/api/static/fonts', express.static(path.join(PKG_DIR, 'fonts'), { maxAge: '30d', fallthrough: false }));
-  app.use('/static/assets', express.static(path.join(PKG_DIR, 'assets'), { maxAge: '7d', fallthrough: false }));
-  app.use('/static/fonts', express.static(path.join(PKG_DIR, 'fonts'), { maxAge: '30d', fallthrough: false }));
+  app.use('/api/static/assets', express.static(path.join(PKG_DIR, 'assets'), { maxAge: '7d', fallthrough: true }));
+  app.use('/api/static/fonts', express.static(path.join(PKG_DIR, 'fonts'), { maxAge: '30d', fallthrough: true }));
+  app.use('/static/assets', express.static(path.join(PKG_DIR, 'assets'), { maxAge: '7d', fallthrough: true }));
+  app.use('/static/fonts', express.static(path.join(PKG_DIR, 'fonts'), { maxAge: '30d', fallthrough: true }));
 
   app.use('/api', requireAuth, api);
   app.use('/api', (_req, res) => { res.status(404).json({ error: 'Not found.' }); });
