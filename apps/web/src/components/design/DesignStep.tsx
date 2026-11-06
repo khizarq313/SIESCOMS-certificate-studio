@@ -1,7 +1,8 @@
 'use client';
+import { useState } from 'react';
 import {
   FIELD_PRESETS, Ln, Lk, POS, fontCss, freeKey, letteringFor, makeField, templateById,
-  type FieldItem, type Item,
+  type FieldItem, type Item, nextSelection,
 } from '@siescoms/certificate';
 import { useApp } from '@/lib/store';
 import { renderBackground, paperColorAround } from '@/lib/pdfBackground';
@@ -65,8 +66,14 @@ function Sidebar() {
   const addItems = useApp((s) => s.addItems);
   const toggleCampus = useApp((s) => s.toggleCampus);
   const edit = useApp((s) => s.edit);
-  const remove = useApp((s) => s.remove);
-  const { longName, triedLong, layersOpen, sel } = useApp();
+  const select = useApp((s) => s.select);
+  const setLocked = useApp((s) => s.setLocked);
+  const setHidden = useApp((s) => s.setHidden);
+  const moveLayer = useApp((s) => s.moveLayer);
+  const removeMany = useApp((s) => s.removeMany);
+  const { longName, triedLong, layersOpen, selIds, multiMode } = useApp();
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropIdx, setDropIdx] = useState<number | null>(null);
   const { chips, details } = useDetailChips();
   const items = design.items;
   const hasName = items.some((i) => i.kind === 'field' && i.type === 'recipient_name');
@@ -141,18 +148,191 @@ function Sidebar() {
         )}
       </div>
       <div className="card" style={{ padding: 0, gap: 0, overflow: 'hidden' }}>
-        <button type="button" onClick={() => set({ layersOpen: !layersOpen })} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 16, border: 0, background: 'none', cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>
-          <span>Everything on the certificate · {editable.length}</span><span style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 400 }}>{layersOpen ? 'Hide' : 'Show'}</span>
+        <button
+          type="button"
+          onClick={() => set({ layersOpen: !layersOpen })}
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: 16,
+            border: 0,
+            background: 'none',
+            cursor: 'pointer',
+            fontSize: 15,
+            fontWeight: 600,
+          }}
+        >
+          <span>Everything on the certificate · {items.length}</span>
+          <span style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 400 }}>
+            {layersOpen ? 'Hide' : 'Show'}
+          </span>
         </button>
         {layersOpen ? (
-          <div className="layers">
-            {editable.slice().reverse().map((it) => (
-              <div key={it.id} className={`layer${it.id === sel ? ' on' : ''}`} onClick={() => set({ sel: it.id, clean: false })}>
-                <span className="l">{it.kind === 'field' && !it.isDynamic && it.type === 'custom_text' ? `${it.label} · ${it.defaultValue}` : it.label}</span>
-                <span className="k">{KIND[it.kind]}</span>
-                <button type="button" className="x" aria-label={`Remove ${it.label}`} onClick={(e) => { e.stopPropagation(); remove(it.id); }}>×</button>
-              </div>
-            ))}
+          <div
+            className="layers"
+            onPointerLeave={() => {
+              if (dragId) {
+                setDragId(null);
+                setDropIdx(null);
+              }
+            }}
+          >
+            {items
+              .slice()
+              .reverse()
+              .map((it, revIdx) => {
+                const origIdx = items.length - 1 - revIdx;
+                const isSel = selIds.includes(it.id);
+                const isRecipient = it.kind === 'field' && it.type === 'recipient_name';
+                const isDropTarget = dropIdx === revIdx && dragId !== it.id;
+
+                return (
+                  <div
+                    key={it.id}
+                    className={`layer${isSel ? ' on' : ''}${it.hidden ? ' dimmed' : ''}${
+                      isDropTarget ? ' drop-target' : ''
+                    }`}
+                    onClick={(e) => {
+                      const add = e.shiftKey || e.ctrlKey || e.metaKey || multiMode;
+                      select(nextSelection(selIds, it.id, add));
+                      set({ clean: false });
+                    }}
+                    onPointerEnter={() => {
+                      if (dragId) setDropIdx(revIdx);
+                    }}
+                  >
+                    {/* Drag Handle */}
+                    <span
+                      className="layer-handle"
+                      title="Drag to reorder"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+                        setDragId(it.id);
+                        setDropIdx(revIdx);
+                      }}
+                      onPointerUp={(e) => {
+                        e.stopPropagation();
+                        if (dragId && dropIdx !== null) {
+                          const toIndex = items.length - 1 - dropIdx;
+                          moveLayer(dragId, toIndex);
+                        }
+                        setDragId(null);
+                        setDropIdx(null);
+                      }}
+                    >
+                      <svg width="10" height="14" viewBox="0 0 10 16" fill="currentColor">
+                        <circle cx="2.5" cy="3" r="1.5" />
+                        <circle cx="7.5" cy="3" r="1.5" />
+                        <circle cx="2.5" cy="8" r="1.5" />
+                        <circle cx="7.5" cy="8" r="1.5" />
+                        <circle cx="2.5" cy="13" r="1.5" />
+                        <circle cx="7.5" cy="13" r="1.5" />
+                      </svg>
+                    </span>
+
+                    {/* Up / Down Buttons for quick/keyboard reordering */}
+                    <button
+                      type="button"
+                      className="layer-btn"
+                      title="Move up (toward front)"
+                      aria-label="Move up"
+                      disabled={origIdx === items.length - 1}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveLayer(it.id, origIdx + 1);
+                      }}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      className="layer-btn"
+                      title="Move down (toward back)"
+                      aria-label="Move down"
+                      disabled={origIdx === 0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveLayer(it.id, origIdx - 1);
+                      }}
+                    >
+                      ▼
+                    </button>
+
+                    {/* Label and Kind Badge */}
+                    <span className="l">
+                      {it.kind === 'field' && !it.isDynamic && it.type === 'custom_text'
+                        ? `${it.label} · ${it.defaultValue}`
+                        : it.label}
+                    </span>
+                    <span className="k">{KIND[it.kind]}</span>
+
+                    {/* Hide / Show Eye Button */}
+                    <button
+                      type="button"
+                      className={`layer-btn${it.hidden ? ' on' : ''}`}
+                      title={
+                        isRecipient
+                          ? 'The recipient name can not be hidden'
+                          : 'Hidden items are not printed'
+                      }
+                      aria-label={it.hidden ? 'Show item' : 'Hide item'}
+                      disabled={isRecipient}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setHidden([it.id], !it.hidden);
+                      }}
+                    >
+                      {it.hidden ? (
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M13.36 14.77L1.23 2.64l1.41-1.41 12.13 12.13-1.41 1.41zM8 3.5c3.5 0 6.64 2.18 7.9 5.5-1 2.63-3.23 4.54-5.9 5.21l-1.63-1.63a3.5 3.5 0 00-4.45-4.45L2.24 6.45C3.5 4.67 5.6 3.5 8 3.5z" />
+                        </svg>
+                      ) : (
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M8 3.5C4.5 3.5 1.36 5.68.1 9c1.26 3.32 4.4 5.5 7.9 5.5s6.64-2.18 7.9-5.5c-1.26-3.32-4.4-5.5-7.9-5.5zm0 9a3.5 3.5 0 110-7 3.5 3.5 0 010 7zm0-5.5a2 2 0 100 4 2 2 0 000-4z" />
+                        </svg>
+                      )}
+                    </button>
+
+                    {/* Padlock Lock / Unlock Button */}
+                    <button
+                      type="button"
+                      className={`layer-btn${it.locked ? ' on' : ''}`}
+                      title={it.locked ? 'Unlock item' : 'Lock item'}
+                      aria-label={it.locked ? 'Unlock item' : 'Lock item'}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLocked([it.id], !it.locked);
+                      }}
+                    >
+                      {it.locked ? (
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M8 1a4 4 0 00-4 4v2H3v8h10V7h-1V5a4 4 0 00-4-4zm-2 4a2 2 0 114 0v2H6V5zm2 5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" />
+                        </svg>
+                      ) : (
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M10 5a2 2 0 10-4 0v2h5v8H3V7h1V5a4 4 0 118 0v1h-2V5zm-2 5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" />
+                        </svg>
+                      )}
+                    </button>
+
+                    {/* Remove Button */}
+                    <button
+                      type="button"
+                      className="x"
+                      aria-label={`Remove ${it.label}`}
+                      disabled={it.locked}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeMany([it.id]);
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
           </div>
         ) : null}
       </div>

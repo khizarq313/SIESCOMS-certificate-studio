@@ -66,6 +66,7 @@ function FieldText({ it, text, page }: { it: FieldItem; text: string; page: Page
 }
 
 export function CertItem({ it, values, page, resolveSrc }: { it: Item; values: Values; page: PageSize; resolveSrc: ResolveSrc }) {
+  if (it.hidden) return null;
   const box: CSSProperties = { ...itemBox(it, page), pointerEvents: 'none' };
   switch (it.kind) {
     case 'field': {

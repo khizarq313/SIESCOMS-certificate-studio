@@ -93,6 +93,7 @@ export function snapTargets(
   const targets: Box[] = [];
   for (const it of items) {
     if (excludeIds.has(it.id)) continue;
+    if (it.hidden) continue;
     if (it.kind === 'image' && (it as { campus?: boolean }).campus) continue;
     const b = itemBounds(it);
     if (it.kind !== 'line' && (b.w <= 0 || b.h <= 0)) continue;

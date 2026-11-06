@@ -5,6 +5,9 @@ import {
   campusItem, designFromTemplate, freeKey, letteringFor, makeField, makePatch, newId, templateById,
   type ColumnMap, type Design, type FieldItem, type Item, type Row, type TextStyle,
   type Guide, type GapMark,
+  alignDeltas, distributeDeltas, reorderItems, moveLayer as reorderLayer, itemBounds, unionBox,
+  snapTargets, snapMove,
+  type AlignMode, type LayerOp,
 } from '@siescoms/certificate';
 import type { JobResult, UploadInfo } from './api';
 
@@ -49,7 +52,9 @@ interface State {
   // Design
   designId: string | null;
   design: Design;
+  selIds: string[];
   sel: string | null;
+  multiMode: boolean;
   clean: boolean;
   snap: SnapState;
   longName: boolean;
@@ -95,8 +100,18 @@ interface Actions {
   redo: () => void;
   updItem: (id: string, p: Partial<Item>, record?: boolean) => void;
   updStyle: (id: string, p: Partial<TextStyle>) => void;
+  select: (ids: string[]) => void;
   remove: (id: string) => void;
+  removeMany: (ids: string[]) => void;
   dup: (id: string) => void;
+  dupMany: (ids: string[]) => void;
+  setLocked: (ids: string[], value: boolean) => void;
+  setHidden: (ids: string[], value: boolean) => void;
+  alignSelection: (mode: AlignMode) => void;
+  distributeSelection: (axis: 'x' | 'y') => void;
+  reorder: (op: LayerOp) => void;
+  moveLayer: (id: string, toIndex: number) => void;
+  nudgeSelection: (dx: number, dy: number) => void;
   addItems: (items: Item[]) => void;
   useTemplate: (id: string, campus: boolean, name?: string) => void;
   useUpload: (info: UploadInfo, pageIndex: number, name: string) => void;
@@ -116,7 +131,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   step: 1, maxStep: 1,
   srcMode: 'tpl', tplPick: 'classic', campus: false,
   upload: { status: 'idle', pct: 0, phase: 'upload', fileName: '', error: '', info: null, pageIndex: 0 },
-  designId: null, design: DEFAULT_DESIGN, sel: null, clean: false, snap: EMPTY_SNAP, longName: false, triedLong: false, layersOpen: false,
+  designId: null, design: DEFAULT_DESIGN, selIds: [], sel: null, multiMode: false, clean: false, snap: EMPTY_SNAP, longName: false, triedLong: false, layersOpen: false,
   saveState: 'idle', past: [], future: [],
   recipMode: 'single', manualPeople: [{ id: '1', values: {}, email: '' }], single: {}, singleEmail: '', rows: [], headers: [], map: {}, emailCol: '', prevIdx: 0, dataName: '', dataNote: '', listBusy: false, listError: '',
   delivery: 'download', fmt: 'zip', baseName: 'symposium_certificates', sender: 'system', smtp: { host: '', port: '587', user: '', pass: '' },
@@ -126,7 +141,8 @@ export const useApp = create<State & Actions>()((set, get) => ({
   run: null,
 
   set: (p) => set(p as never),
-  go: (n) => set((s) => ({ step: n, maxStep: (Math.max(s.maxStep, n) as Step), sel: null, snap: EMPTY_SNAP })),
+  select: (ids) => set({ selIds: ids, sel: ids.length === 1 ? ids[0] : null }),
+  go: (n) => set((s) => ({ step: n, maxStep: (Math.max(s.maxStep, n) as Step), sel: null, selIds: [], snap: EMPTY_SNAP })),
   setSnap: (next) => {
     const cur = get().snap;
     if (JSON.stringify(cur) !== JSON.stringify(next)) {
@@ -139,39 +155,157 @@ export const useApp = create<State & Actions>()((set, get) => ({
     if (record) get().record();
     set((s) => ({ design: fn(s.design) }));
   },
-  undo: () => set((s) => (s.past.length ? { design: s.past[s.past.length - 1], past: s.past.slice(0, -1), future: [...s.future, s.design], sel: null } : {})),
-  redo: () => set((s) => (s.future.length ? { design: s.future[s.future.length - 1], future: s.future.slice(0, -1), past: [...s.past, s.design], sel: null } : {})),
+  undo: () => set((s) => (s.past.length ? { design: s.past[s.past.length - 1], past: s.past.slice(0, -1), future: [...s.future, s.design], sel: null, selIds: [] } : {})),
+  redo: () => set((s) => (s.future.length ? { design: s.future[s.future.length - 1], future: s.future.slice(0, -1), past: [...s.past, s.design], sel: null, selIds: [] } : {})),
 
   updItem: (id, p, record = true) => get().edit((d) => ({ ...d, items: d.items.map((i) => (i.id === id ? ({ ...i, ...p } as Item) : i)) }), record),
   updStyle: (id, p) => get().edit((d) => ({ ...d, items: d.items.map((i) => (i.id === id && i.kind === 'field' ? { ...i, style: { ...i.style, ...p } } : i)) })),
-  remove: (id) => { get().edit((d) => ({ ...d, items: d.items.filter((i) => i.id !== id) })); set({ sel: null }); },
-  dup: (id) => {
+  remove: (id) => get().removeMany([id]),
+  removeMany: (ids) => {
+    const idSet = new Set(ids);
+    get().edit((d) => ({ ...d, items: d.items.filter((i) => !idSet.has(i.id) || i.locked) }));
+    const remaining = get().selIds.filter((id) => !idSet.has(id));
+    get().select(remaining);
+  },
+  dup: (id) => get().dupMany([id]),
+  dupMany: (ids) => {
     const { design } = get();
-    const it = design.items.find((i) => i.id === id);
-    if (!it) return;
-    const c = { ...it, id: newId(), x: it.x + 14, y: it.y + 14 } as Item;
-    if (c.kind === 'field') {
-      c.sample = false;
-      c.style = { ...c.style };
-      if (c.type !== 'custom_text') {
-        c.key = freeKey(design, c.type);
-        c.label = `${it.label} copy`;
+    const idSet = new Set(ids);
+    const toDup = design.items.filter((i) => idSet.has(i.id) && !i.locked);
+    if (toDup.length === 0) return;
+    const copies: Item[] = [];
+    let curItems = [...design.items];
+    for (const it of toDup) {
+      const c = { ...it, id: newId(), x: it.x + 14, y: it.y + 14 } as Item;
+      if (c.kind === 'field') {
+        c.sample = false;
+        c.style = { ...c.style };
+        if (c.type !== 'custom_text') {
+          c.key = freeKey({ ...design, items: curItems }, c.type);
+          c.label = `${it.label} copy`;
+        }
+      }
+      if (c.kind === 'image') c.campus = false;
+      copies.push(c);
+      curItems.push(c);
+    }
+    get().edit((d) => ({ ...d, items: [...d.items, ...copies] }));
+    get().select(copies.map((c) => c.id));
+  },
+  setLocked: (ids, value) => {
+    const idSet = new Set(ids);
+    get().edit((d) => ({
+      ...d,
+      items: d.items.map((i) => (idSet.has(i.id) ? ({ ...i, locked: value } as Item) : i)),
+    }));
+  },
+  setHidden: (ids, value) => {
+    const idSet = new Set(ids);
+    get().edit((d) => ({
+      ...d,
+      items: d.items.map((i) => {
+        if (idSet.has(i.id)) {
+          if (i.kind === 'field' && i.type === 'recipient_name') return i;
+          return { ...i, hidden: value } as Item;
+        }
+        return i;
+      }),
+    }));
+  },
+  alignSelection: (mode) => {
+    const { design, selIds } = get();
+    const selected = design.items.filter((i) => selIds.includes(i.id) && !i.locked);
+    if (selected.length === 0) return;
+    const entries = selected.map((i) => ({ id: i.id, box: itemBounds(i) }));
+    const ref =
+      entries.length >= 2
+        ? unionBox(entries.map((e) => e.box))
+        : { x: 0, y: 0, w: design.page.w, h: design.page.h };
+    const deltas = alignDeltas(entries, mode, ref);
+    const deltaMap = new Map(deltas.map((d) => [d.id, d]));
+    get().edit((d) => ({
+      ...d,
+      items: d.items.map((i) => {
+        const delta = deltaMap.get(i.id);
+        if (delta) {
+          return {
+            ...i,
+            x: Math.round((i.x + delta.dx) * 100) / 100,
+            y: Math.round((i.y + delta.dy) * 100) / 100,
+          } as Item;
+        }
+        return i;
+      }),
+    }));
+  },
+  distributeSelection: (axis) => {
+    const { design, selIds } = get();
+    const selected = design.items.filter((i) => selIds.includes(i.id) && !i.locked);
+    if (selected.length < 3) return;
+    const entries = selected.map((i) => ({ id: i.id, box: itemBounds(i) }));
+    const deltas = distributeDeltas(entries, axis);
+    const deltaMap = new Map(deltas.map((d) => [d.id, d]));
+    get().edit((d) => ({
+      ...d,
+      items: d.items.map((i) => {
+        const delta = deltaMap.get(i.id);
+        if (delta) {
+          return {
+            ...i,
+            x: Math.round((i.x + delta.dx) * 100) / 100,
+            y: Math.round((i.y + delta.dy) * 100) / 100,
+          } as Item;
+        }
+        return i;
+      }),
+    }));
+  },
+  reorder: (op) => {
+    const { selIds } = get();
+    get().edit((d) => ({ ...d, items: reorderItems(d.items, selIds, op) }));
+  },
+  moveLayer: (id, toIndex) => {
+    get().edit((d) => ({ ...d, items: reorderLayer(d.items, id, toIndex) }));
+  },
+  nudgeSelection: (dx, dy) => {
+    const { design, selIds } = get();
+    const idSet = new Set(selIds);
+    get().edit(
+      (d) => ({
+        ...d,
+        items: d.items.map((i) =>
+          idSet.has(i.id) && !i.locked
+            ? ({
+                ...i,
+                x: Math.round((i.x + dx) * 100) / 100,
+                y: Math.round((i.y + dy) * 100) / 100,
+              } as Item)
+            : i
+        ),
+      }),
+      true
+    );
+    const selected = get().design.items.filter((i) => idSet.has(i.id) && !i.locked);
+    if (selected.length > 0) {
+      const movingBox = unionBox(selected.map(itemBounds));
+      const targets = snapTargets(get().design.items, idSet, design.page);
+      const snapRes = snapMove(movingBox, targets, design.page, { threshold: 1, margin: 36 });
+      if (snapRes.guides.length > 0) {
+        get().setSnap({ guides: snapRes.guides, gaps: snapRes.gaps, badge: null });
       }
     }
-    if (c.kind === 'image') c.campus = false;
-    get().edit((d) => ({ ...d, items: [...d.items, c] }));
-    set({ sel: c.id });
   },
   addItems: (items) => {
     get().edit((d) => ({ ...d, items: [...d.items, ...items] }));
-    set({ sel: items[items.length - 1]?.id ?? null });
+    const last = items[items.length - 1];
+    get().select(last ? [last.id] : []);
   },
 
   useTemplate: (id, campus, name) => {
     const s = get();
     // Keep edits if the same template is picked again.
     if (s.design.templateId === id && s.design.items.some((i) => i.kind === 'image' && i.campus) === campus && s.designId) return;
-    set({ design: designFromTemplate(id, campus, name || s.design.name), designId: null, past: [], future: [], sel: null, longName: false, triedLong: false, clean: false, saveState: 'idle' });
+    set({ design: designFromTemplate(id, campus, name || s.design.name), designId: null, past: [], future: [], sel: null, selIds: [], longName: false, triedLong: false, clean: false, saveState: 'idle' });
   },
   useUpload: (info, pageIndex, name) => {
     set({
@@ -180,10 +314,10 @@ export const useApp = create<State & Actions>()((set, get) => ({
         background: { fileKey: info.fileKey, fileType: info.fileType, pageIndex, pages: info.pages, fileName: info.fileName },
         detected: info.detected, items: [],
       },
-      designId: null, past: [], future: [], sel: null, longName: false, triedLong: false, clean: false, saveState: 'idle',
+      designId: null, past: [], future: [], sel: null, selIds: [], longName: false, triedLong: false, clean: false, saveState: 'idle',
     });
   },
-  loadSaved: (id, design) => set({ design, designId: id, past: [], future: [], sel: null, longName: false, triedLong: false, clean: false, saveState: 'saved', tplPick: design.templateId === 'upload' ? get().tplPick : design.templateId }),
+  loadSaved: (id, design) => set({ design, designId: id, past: [], future: [], sel: null, selIds: [], longName: false, triedLong: false, clean: false, saveState: 'saved', tplPick: design.templateId === 'upload' ? get().tplPick : design.templateId }),
 
   replaceSampleName: (paperColor) => {
     const { design } = get();
@@ -197,7 +331,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
         x: Math.round(cx - 210), w: 420, y: smp.y - 4, h: Math.max(smp.h + 8, 50), style: { ...smp.style, autoShrink: true, minFontSize: 12 },
       };
       get().edit((d) => ({ ...d, items: d.items.map((i) => (i.id === smp.id ? rec : i)) }));
-      set({ sel: rec.id });
+      get().select([rec.id]);
       return;
     }
     const det = design.detected;
@@ -210,13 +344,13 @@ export const useApp = create<State & Actions>()((set, get) => ({
     Object.assign(rec, { x: Math.round(det.x + det.w / 2 - w / 2), y: Math.round(det.y + det.h / 2 - size * 0.75), w: Math.round(w), h: Math.round(size * 1.5) });
     rec.style = { ...rec.style, fontSize: size };
     get().edit((d) => ({ ...d, items: [...d.items, patch, rec] }));
-    set({ sel: rec.id });
+    get().select([rec.id]);
   },
   toggleCampus: () => {
     const { design } = get();
     const t = templateById(design.templateId);
     get().edit((d) => ({ ...d, items: d.items.some((i) => i.kind === 'image' && i.campus) ? d.items.filter((i) => !(i.kind === 'image' && i.campus)) : [campusItem(t, d.page), ...d.items] }));
-    set({ sel: null });
+    set({ sel: null, selIds: [] });
   },
 
   addManualPerson: () => {

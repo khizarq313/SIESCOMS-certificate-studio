@@ -30,6 +30,7 @@ const base = {
   x: num, y: num, w: num.min(0), h: num.min(0),
   rot: num.optional(),
   locked: z.boolean().optional(),
+  hidden: z.boolean().optional(),
 };
 
 export const FieldItemSchema = z.object({

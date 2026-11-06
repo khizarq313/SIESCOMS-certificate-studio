@@ -9,6 +9,10 @@ import {
   snapMove,
   snapResize,
   distancesFor,
+  unionBox,
+  itemBounds,
+  marqueeHits,
+  nextSelection,
   type Box,
   type Item,
 } from '@siescoms/certificate';
@@ -16,20 +20,26 @@ import { EMPTY_SNAP, useApp } from '@/lib/store';
 import { CertView } from '../common';
 import { ItemPopover } from './ItemPopover';
 import { SnapGuides } from './SnapGuides';
+import { SelectionBar } from './SelectionBar';
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const NUDGE = 1;
 
-/** Moves, resizes, nudges and keyboard shortcuts, ported from the prototype's down()/key(). */
+/** Moves, resizes, nudges and keyboard shortcuts. */
 function useEditorKeys() {
+  const guideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const s = useApp.getState();
       if (s.step !== 2) return;
       const t = e.target as HTMLElement | null;
       if (t && /INPUT|SELECT|TEXTAREA/.test(t.tagName)) return;
-      const mod = e.metaKey || e.ctrlKey,
-        k = (e.key || '').toLowerCase();
+
+      const mod = e.metaKey || e.ctrlKey;
+      const k = (e.key || '').toLowerCase();
+
+      // Undo / Redo
       if (mod && k === 'z') {
         e.preventDefault();
         if (e.shiftKey) s.redo();
@@ -41,12 +51,52 @@ function useEditorKeys() {
         s.redo();
         return;
       }
-      if (e.key === 'Escape') {
-        s.set({ sel: null });
+
+      // Select All (visible, unlocked items except campus illustration)
+      if (mod && k === 'a') {
+        e.preventDefault();
+        const all = s.design.items
+          .filter(
+            (it) =>
+              !it.locked &&
+              !it.hidden &&
+              !(it.kind === 'image' && (it as { campus?: boolean }).campus)
+          )
+          .map((it) => it.id);
+        s.select(all);
         return;
       }
-      const it = s.design.items.find((i) => i.id === s.sel);
-      if (!it || s.clean || it.locked) return;
+
+      // Clear selection
+      if (e.key === 'Escape') {
+        s.select([]);
+        return;
+      }
+
+      // Layer ordering shortcuts
+      if (mod && e.key === ']') {
+        e.preventDefault();
+        if (e.shiftKey) s.reorder('front');
+        else s.reorder('forward');
+        return;
+      }
+      if (mod && e.key === '[') {
+        e.preventDefault();
+        if (e.shiftKey) s.reorder('back');
+        else s.reorder('backward');
+        return;
+      }
+
+      // Delete / Backspace removes selected unlocked items
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (s.selIds.length > 0) {
+          e.preventDefault();
+          s.removeMany(s.selIds);
+          return;
+        }
+      }
+
+      // Arrow keys nudge all selected unlocked items
       const st = e.shiftKey ? 10 : NUDGE;
       const d = (
         {
@@ -56,36 +106,50 @@ function useEditorKeys() {
           ArrowDown: [0, st],
         } as Record<string, number[]>
       )[e.key];
+
       if (d) {
-        e.preventDefault();
-        s.updItem(it.id, { x: it.x + d[0], y: it.y + d[1] });
-      }
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        e.preventDefault();
-        s.remove(it.id);
+        if (s.selIds.length > 0) {
+          e.preventDefault();
+          s.nudgeSelection(d[0], d[1]);
+          // Clean up helping lines after nudging stops
+          if (guideTimerRef.current) clearTimeout(guideTimerRef.current);
+          guideTimerRef.current = setTimeout(() => {
+            useApp.getState().setSnap(EMPTY_SNAP);
+          }, 1200);
+        }
       }
     };
+
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (guideTimerRef.current) clearTimeout(guideTimerRef.current);
+    };
   }, []);
 }
 
 export function EditorStage() {
   const design = useApp((s) => s.design);
+  const selIds = useApp((s) => s.selIds);
   const sel = useApp((s) => s.sel);
+  const multiMode = useApp((s) => s.multiMode);
   const clean = useApp((s) => s.clean);
   const longName = useApp((s) => s.longName);
   const pastN = useApp((s) => s.past.length);
   const futureN = useApp((s) => s.future.length);
-  const { set, undo, redo, go } = useApp.getState();
+  const { set, select, undo, redo, go } = useApp.getState();
   const ref = useRef<HTMLDivElement>(null);
   const [, force] = useState(0);
+
+  // Marquee state
+  const [marquee, setMarquee] = useState<Box | null>(null);
+
   useEditorKeys();
 
   const page = design.page;
   const items = design.items;
   const hasName = items.some((i) => i.kind === 'field' && i.type === 'recipient_name');
-  const selItem = items.find((i) => i.id === sel) || null;
+  const selItem = selIds.length === 1 ? items.find((i) => i.id === selIds[0]) || null : null;
   const sample = items.find((i) => i.kind === 'field' && i.sample);
   const hiBox =
     !hasName && !clean
@@ -94,17 +158,41 @@ export function EditorStage() {
         : design.detected
       : null;
 
+  // Item interaction handler (Move or Resize)
   const down = (id: string, mode: 'move' | 'size') => (e: React.PointerEvent) => {
     const s = useApp.getState();
     if (s.clean) return;
     const it = s.design.items.find((i) => i.id === id);
-    if (!it || it.locked || !ref.current) return;
+    if (!it || it.locked || it.hidden || !ref.current) return;
+
     e.stopPropagation();
     e.preventDefault();
-    if (s.sel !== id) s.set({ sel: id });
+
+    const isAdditive = e.shiftKey || e.ctrlKey || e.metaKey || s.multiMode;
+
+    if (mode === 'move' && isAdditive) {
+      // Toggle item in selection and do not start drag
+      s.select(nextSelection(s.selIds, id, true));
+      return;
+    }
+
+    let activeSelIds = s.selIds;
+    if (!s.selIds.includes(id)) {
+      activeSelIds = [id];
+      s.select([id]);
+    }
+
+    const isMultiMove = activeSelIds.length > 1;
+    const movingItems = s.design.items.filter(
+      (item) => activeSelIds.includes(item.id) && !item.locked && !item.hidden
+    );
+    const initialPositions = new Map(
+      movingItems.map((item) => [item.id, { x: item.x, y: item.y }])
+    );
+    const initialUnion = unionBox(movingItems.map(itemBounds));
 
     // Compute snap targets ONCE when gesture starts
-    const targets = snapTargets(items, new Set([id]), page);
+    const targets = snapTargets(items, new Set(activeSelIds), page);
 
     const k = page.w / ref.current.getBoundingClientRect().width;
     const sx = e.clientX,
@@ -123,34 +211,42 @@ export function EditorStage() {
       const thresholdPt = 6 * k;
 
       if (mode === 'move') {
-        const rawX = clamp(it.x + dx, -it.w + 12, page.w - 12);
-        const rawY = clamp(it.y + dy, -it.h + 6, page.h - 6);
-        const rawBox: Box = { x: rawX, y: rawY, w: it.w, h: it.h };
-
         const noSnap = ev.ctrlKey || ev.metaKey;
         const showDist = ev.altKey;
 
-        let finalX = rawX;
-        let finalY = rawY;
+        const rawUnionBox: Box = {
+          x: initialUnion.x + dx,
+          y: initialUnion.y + dy,
+          w: initialUnion.w,
+          h: initialUnion.h,
+        };
+
+        let shiftX = dx;
+        let shiftY = dy;
         let guides: typeof s.snap.guides = [];
         let gaps: typeof s.snap.gaps = [];
 
         if (noSnap) {
           if (showDist) {
-            gaps = distancesFor(rawBox, targets, page);
+            gaps = distancesFor(rawUnionBox, targets, page);
           }
         } else {
-          const snapRes = snapMove(rawBox, targets, page, {
+          const snapRes = snapMove(rawUnionBox, targets, page, {
             threshold: thresholdPt,
             margin: 36,
           });
-          finalX = rawX + snapRes.dx;
-          finalY = rawY + snapRes.dy;
+          shiftX = dx + snapRes.dx;
+          shiftY = dy + snapRes.dy;
           guides = snapRes.guides;
           gaps = snapRes.gaps;
           if (showDist) {
             const extraGaps = distancesFor(
-              { x: finalX, y: finalY, w: it.w, h: it.h },
+              {
+                x: rawUnionBox.x + snapRes.dx,
+                y: rawUnionBox.y + snapRes.dy,
+                w: rawUnionBox.w,
+                h: rawUnionBox.h,
+              },
               targets,
               page
             );
@@ -158,12 +254,25 @@ export function EditorStage() {
           }
         }
 
-        const x = Math.round(finalX * 100) / 100;
-        const y = Math.round(finalY * 100) / 100;
+        s.edit(
+          (d) => ({
+            ...d,
+            items: d.items.map((item) => {
+              const init = initialPositions.get(item.id);
+              if (!init) return item;
+              return {
+                ...item,
+                x: Math.round((init.x + shiftX) * 100) / 100,
+                y: Math.round((init.y + shiftY) * 100) / 100,
+              };
+            }),
+          }),
+          false
+        );
 
-        s.updItem(id, { x, y }, false);
         s.setSnap({ guides, gaps, badge: null });
       } else {
+        // 'size' mode (single item only)
         const rawW = clamp(it.w + dx, 8, 2400);
         const rawH = clamp(it.h + dy, 4, 2400);
         const keepAspect = ev.shiftKey || it.kind === 'lockup';
@@ -188,11 +297,7 @@ export function EditorStage() {
         };
 
         const p: Partial<Item> =
-          it.kind === 'lockup'
-            ? { w, h }
-            : it.kind === 'line'
-            ? { w }
-            : { w, h };
+          it.kind === 'lockup' ? { w, h } : it.kind === 'line' ? { w } : { w, h };
 
         s.updItem(id, p, false);
         s.setSnap({ guides: snapRes.guides, gaps: [], badge });
@@ -204,12 +309,88 @@ export function EditorStage() {
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       s.setSnap(EMPTY_SNAP);
+      if (!moved && isMultiMove) {
+        // Release without move collapses selection to just that item
+        s.select([id]);
+      }
       force((n) => n + 1);
     };
 
     window.addEventListener('pointermove', mv);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
+  };
+
+  // Canvas Marquee / Background PointerDown
+  const onCanvasDown = (e: React.PointerEvent) => {
+    const s = useApp.getState();
+    if (s.clean || !ref.current) return;
+
+    // Touch devices scroll instead of marquee
+    if (e.pointerType === 'touch') {
+      if (s.selIds.length > 0 && !s.multiMode) {
+        s.select([]);
+      }
+      return;
+    }
+
+    const rect = ref.current.getBoundingClientRect();
+    const k = page.w / rect.width;
+    const sx = (e.clientX - rect.left) * k;
+    const sy = (e.clientY - rect.top) * k;
+    const clientStartX = e.clientX;
+    const clientStartY = e.clientY;
+    const isAdditive = e.shiftKey || s.multiMode;
+    const initialSel = isAdditive ? s.selIds : [];
+
+    let activeMarquee = false;
+
+    const onMv = (ev: PointerEvent) => {
+      const curX = (ev.clientX - rect.left) * k;
+      const curY = (ev.clientY - rect.top) * k;
+      const distPx = Math.hypot(ev.clientX - clientStartX, ev.clientY - clientStartY);
+
+      if (!activeMarquee) {
+        if (distPx < 4) return;
+        activeMarquee = true;
+      }
+
+      const mBox: Box = {
+        x: Math.min(sx, curX),
+        y: Math.min(sy, curY),
+        w: Math.abs(curX - sx),
+        h: Math.abs(curY - sy),
+      };
+
+      setMarquee(mBox);
+
+      const entries = s.design.items.map((item) => ({
+        id: item.id,
+        box: itemBounds(item),
+        locked: item.locked,
+        hidden: item.hidden,
+      }));
+
+      const hits = marqueeHits(entries, mBox, page);
+      const next = isAdditive ? Array.from(new Set([...initialSel, ...hits])) : hits;
+      s.select(next);
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', onMv);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      setMarquee(null);
+
+      const distPx = Math.hypot(ev.clientX - clientStartX, ev.clientY - clientStartY);
+      if (distPx < 4 && !isAdditive) {
+        s.select([]);
+      }
+    };
+
+    window.addEventListener('pointermove', onMv);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   };
 
   return (
@@ -240,9 +421,18 @@ export function EditorStage() {
             type="button"
             className={`toggle-chip${clean ? ' on' : ''}`}
             style={{ height: 34 }}
-            onClick={() => set({ clean: !clean, sel: null })}
+            onClick={() => set({ clean: !clean, sel: null, selIds: [] })}
           >
             {clean ? 'Back to editing' : 'Preview'}
+          </button>
+          <button
+            type="button"
+            className={`toggle-chip${multiMode ? ' on' : ''}`}
+            style={{ height: 34 }}
+            onClick={() => set({ multiMode: !multiMode })}
+            title="Toggle multi-select for touch"
+          >
+            Select several
           </button>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -259,53 +449,112 @@ export function EditorStage() {
           </button>
         </div>
       </div>
-      <div
-        className="editor"
-        ref={ref}
-        onPointerDown={() => {
-          if (useApp.getState().sel) set({ sel: null });
-        }}
-      >
+
+      {/* Selection Toolbar Bar */}
+      <SelectionBar />
+
+      <div className="editor" ref={ref} onPointerDown={onCanvasDown}>
         <CertView design={design} values={sampleValues(design, longName)}>
           {!clean
-            ? items
-                .filter((it) => !it.locked)
-                .map((it) => {
-                  const frame =
-                    it.kind === 'shape' && !it.fill && !it.grad && !!it.stroke;
-                  const isSel = it.id === sel;
-                  const cls = [
-                    'hit',
-                    frame && 'frame',
-                    isSel && 'sel',
-                    it.kind === 'field' && it.isDynamic && 'dyn',
-                    it.kind === 'patch' && 'patch',
-                  ]
-                    .filter(Boolean)
-                    .join(' ');
-                  return (
-                    <div
-                      key={it.id}
-                      className={cls}
-                      style={itemBox(it, page)}
-                      onPointerDown={frame ? undefined : down(it.id, 'move')}
-                    >
-                      {frame
-                        ? (['t', 'b', 'l', 'r'] as const).map((s) => (
-                            <div
-                              key={s}
-                              className={`edge ${s}`}
-                              onPointerDown={down(it.id, 'move')}
-                            />
-                          ))
-                        : null}
-                      {isSel ? (
-                        <div className="handle" onPointerDown={down(it.id, 'size')} />
-                      ) : null}
-                    </div>
-                  );
-                })
+            ? items.map((it) => {
+                if (it.hidden) return null;
+
+                const isSel = selIds.includes(it.id);
+
+                if (it.locked) {
+                  // A selected locked item shows a non-interactive dashed outline
+                  if (isSel) {
+                    return (
+                      <div
+                        key={it.id}
+                        className="hit locked sel"
+                        style={itemBox(it, page)}
+                      />
+                    );
+                  }
+                  return null;
+                }
+
+                const frame =
+                  it.kind === 'shape' && !it.fill && !it.grad && !!it.stroke;
+                const cls = [
+                  'hit',
+                  frame && 'frame',
+                  isSel && 'sel',
+                  it.kind === 'field' && it.isDynamic && 'dyn',
+                  it.kind === 'patch' && 'patch',
+                ]
+                  .filter(Boolean)
+                  .join(' ');
+
+                return (
+                  <div
+                    key={it.id}
+                    className={cls}
+                    style={itemBox(it, page)}
+                    onPointerDown={frame ? undefined : down(it.id, 'move')}
+                  >
+                    {frame
+                      ? (['t', 'b', 'l', 'r'] as const).map((s) => (
+                          <div
+                            key={s}
+                            className={`edge ${s}`}
+                            onPointerDown={down(it.id, 'move')}
+                          />
+                        ))
+                      : null}
+                    {isSel && selIds.length === 1 ? (
+                      <div className="handle" onPointerDown={down(it.id, 'size')} />
+                    ) : null}
+                  </div>
+                );
+              })
             : null}
+
+          {/* Group Bounding Box when 2+ items selected */}
+          {!clean &&
+            selIds.length >= 2 &&
+            (() => {
+              const selectedItems = items.filter(
+                (it) => selIds.includes(it.id) && !it.hidden
+              );
+              if (selectedItems.length < 2) return null;
+              const groupBox = unionBox(selectedItems.map(itemBounds));
+              return (
+                <div
+                  className="group-bounding-box"
+                  style={{
+                    position: 'absolute',
+                    left: pct(groupBox.x, page.w),
+                    top: pct(groupBox.y, page.h),
+                    width: pct(groupBox.w, page.w),
+                    height: pct(groupBox.h, page.h),
+                    border: '1.5px dashed #2563eb',
+                    pointerEvents: 'none',
+                    zIndex: 8,
+                  }}
+                />
+              );
+            })()}
+
+          {/* Marquee Selection Rectangle */}
+          {marquee && (
+            <div
+              className="marquee-box"
+              style={{
+                position: 'absolute',
+                left: pct(marquee.x, page.w),
+                top: pct(marquee.y, page.h),
+                width: pct(marquee.w, page.w),
+                height: pct(marquee.h, page.h),
+                border: '1px dashed #2563eb',
+                background: 'rgba(37, 99, 235, 0.08)',
+                pointerEvents: 'none',
+                zIndex: 10,
+              }}
+            />
+          )}
+
           {hiBox ? (
             <div
               className="hilite"
@@ -317,9 +566,11 @@ export function EditorStage() {
               }}
             />
           ) : null}
+
           <SnapGuides page={page} />
+
           <AnimatePresence>
-            {selItem && !clean && !selItem.locked ? (
+            {selItem && !clean && !selItem.locked && selIds.length === 1 ? (
               <ItemPopover key={selItem.id} item={selItem} />
             ) : null}
           </AnimatePresence>

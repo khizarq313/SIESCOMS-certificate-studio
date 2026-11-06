@@ -7,6 +7,9 @@ export * from './Certificate';
 export * from './editor/imageTools';
 export * from './editor/geometry';
 export * from './editor/snap';
+export * from './editor/align';
+export * from './editor/layers';
+export * from './editor/selection';
 
 /** Built-in art, served as static files by the API at /api/static/assets/<file>. */
 export const ASSET_FILES: Record<string, string> = { sun: 'sun.svg', badge: 'badge.png', campus: 'campus.png', sig: 'sig.png' };
