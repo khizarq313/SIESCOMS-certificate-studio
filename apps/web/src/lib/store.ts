@@ -4,11 +4,20 @@ import { create } from 'zustand';
 import {
   campusItem, designFromTemplate, freeKey, letteringFor, makeField, makePatch, newId, templateById,
   type ColumnMap, type Design, type FieldItem, type Item, type Row, type TextStyle,
+  type Guide, type GapMark,
 } from '@siescoms/certificate';
 import type { JobResult, UploadInfo } from './api';
 
 export type Step = 1 | 2 | 3 | 4;
 export const STEP_SLUGS = ['start', 'design', 'recipients', 'delivery'] as const;
+
+export interface SnapState {
+  guides: Guide[];
+  gaps: GapMark[];
+  badge: { x: number; y: number; text: string } | null;
+}
+
+export const EMPTY_SNAP: SnapState = { guides: [], gaps: [], badge: null };
 
 export interface ManualPerson {
   id: string;
@@ -42,7 +51,7 @@ interface State {
   design: Design;
   sel: string | null;
   clean: boolean;
-  guide: boolean;
+  snap: SnapState;
   longName: boolean;
   triedLong: boolean;
   layersOpen: boolean;
@@ -97,6 +106,7 @@ interface Actions {
   addManualPerson: () => void;
   removeManualPerson: (id: string) => void;
   updateManualPerson: (id: string, patch: { values?: Record<string, string>; email?: string }) => void;
+  setSnap: (next: SnapState) => void;
 }
 
 const DEFAULT_DESIGN = designFromTemplate('classic', false, 'Tech Symposium — Participation');
@@ -106,7 +116,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   step: 1, maxStep: 1,
   srcMode: 'tpl', tplPick: 'classic', campus: false,
   upload: { status: 'idle', pct: 0, phase: 'upload', fileName: '', error: '', info: null, pageIndex: 0 },
-  designId: null, design: DEFAULT_DESIGN, sel: null, clean: false, guide: false, longName: false, triedLong: false, layersOpen: false,
+  designId: null, design: DEFAULT_DESIGN, sel: null, clean: false, snap: EMPTY_SNAP, longName: false, triedLong: false, layersOpen: false,
   saveState: 'idle', past: [], future: [],
   recipMode: 'single', manualPeople: [{ id: '1', values: {}, email: '' }], single: {}, singleEmail: '', rows: [], headers: [], map: {}, emailCol: '', prevIdx: 0, dataName: '', dataNote: '', listBusy: false, listError: '',
   delivery: 'download', fmt: 'zip', baseName: 'symposium_certificates', sender: 'system', smtp: { host: '', port: '587', user: '', pass: '' },
@@ -116,7 +126,13 @@ export const useApp = create<State & Actions>()((set, get) => ({
   run: null,
 
   set: (p) => set(p as never),
-  go: (n) => set((s) => ({ step: n, maxStep: (Math.max(s.maxStep, n) as Step), sel: null })),
+  go: (n) => set((s) => ({ step: n, maxStep: (Math.max(s.maxStep, n) as Step), sel: null, snap: EMPTY_SNAP })),
+  setSnap: (next) => {
+    const cur = get().snap;
+    if (JSON.stringify(cur) !== JSON.stringify(next)) {
+      set({ snap: next });
+    }
+  },
 
   record: () => set((s) => ({ past: [...s.past.slice(-(HISTORY - 1)), s.design], future: [] })),
   edit: (fn, record = true) => {
