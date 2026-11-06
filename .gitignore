@@ -19,6 +19,7 @@ apps/web/.next/
 dist/
 !apps/api/dist/
 build/
+apps/api/api/*.js
 apps/api/assets/
 apps/api/fonts/
 *.tsbuildinfo

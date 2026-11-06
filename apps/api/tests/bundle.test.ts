@@ -14,7 +14,7 @@ describe('production bundle and vercel entry point verification', () => {
 
     // Import the Vercel function entrypoint
     // @ts-ignore
-    const apiEntry = await import('../api/index.js');
+    const apiEntry = await import('../api/index');
     vercelHandler = apiEntry.default;
   });
 

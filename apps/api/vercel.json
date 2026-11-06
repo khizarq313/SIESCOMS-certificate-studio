@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/**": {
+    "api/index.ts": {
       "includeFiles": "dist/**, assets/**, fonts/**, fonts.css, public/**"
     }
   },
