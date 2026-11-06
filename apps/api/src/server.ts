@@ -29,3 +29,4 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.exit(0);
   });
 }
+
