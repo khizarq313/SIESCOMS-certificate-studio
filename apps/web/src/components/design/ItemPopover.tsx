@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { FIELD_PRESETS, FONTS, FONT_GROUPS, letteringFor, pct, type Item } from '@siescoms/certificate';
 import { uploadFile } from '@/lib/api';
 import { useApp } from '@/lib/store';
+import { ImageStudio } from './ImageStudio';
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const hex6 = (c: string) => (/^#[0-9a-f]{6}$/i.test(c || '') ? c : '#888888');
@@ -16,6 +17,7 @@ export function ItemPopover({ item: it }: { item: Item }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [imgBusy, setImgBusy] = useState(false);
   const [imgErr, setImgErr] = useState('');
+  const [studioFile, setStudioFile] = useState<File | null>(null);
   const { w: W, h: H } = design.page;
   const id = it.id;
   // Typing in a box records one undo step when you start, not one per letter.
@@ -28,13 +30,30 @@ export function ItemPopover({ item: it }: { item: Item }) {
     else if (p) updItem(id, p, rec);
   };
 
-  const replaceImage = async (file: File) => {
+  const handleStudioApply = async (out: { blob: Blob; width: number; height: number; transparent: boolean }) => {
     setImgBusy(true);
     setImgErr('');
     try {
+      const isSig = it.kind === 'image' && it.type === 'signature_image';
+      const fileName = isSig ? 'signature.png' : 'logo.png';
+      const file = new File([out.blob], fileName, { type: 'image/png' });
       const r = await uploadFile<{ key: string; width: number; height: number }>('/api/uploads/image', file);
-      // Keep the width, follow the new image's shape.
-      updItem(id, { src: `upload:${r.key}`, h: Math.round((it.w * r.height) / r.width) } as Partial<Item>);
+
+      let h = Math.round((it.w * out.height) / out.width);
+      let w = it.w;
+      if (h > 160) {
+        h = 160;
+        w = Math.round((160 * out.width) / out.height);
+      }
+
+      updItem(id, {
+        src: `upload:${r.key}`,
+        w,
+        h,
+        dark: false,
+        blend: out.transparent ? '' : (it.kind === 'image' ? it.blend : ''),
+      } as Partial<Item>);
+      setStudioFile(null);
     } catch (err) {
       setImgErr((err as Error).message);
     } finally {
@@ -146,12 +165,39 @@ export function ItemPopover({ item: it }: { item: Item }) {
       ) : null}
       {canReplaceImage ? (
         <>
-          <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) replaceImage(f); }} />
-          <button type="button" className="btn btn-ghost btn-sm" disabled={imgBusy} onClick={() => fileRef.current?.click()}>
-            {imgBusy ? 'Uploading…' : it.type === 'signature_image' ? 'Use your own signature' : 'Replace image'}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".png,.jpg,.jpeg,.webp"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (f) setStudioFile(f);
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={imgBusy}
+            onClick={() => fileRef.current?.click()}
+          >
+            {imgBusy
+              ? 'Uploading…'
+              : it.kind === 'image' && it.type === 'signature_image'
+              ? 'Upload your signature'
+              : 'Replace image'}
           </button>
-          {it.type === 'signature_image' ? <span className="hint">A PNG with a transparent background looks best. A white background also works on light paper.</span> : null}
+          <span className="hint">We will help you crop it and remove the background.</span>
           {imgErr ? <span className="note">{imgErr}</span> : null}
+          {studioFile && (
+            <ImageStudio
+              file={studioFile}
+              kind={it.kind === 'image' && it.type === 'signature_image' ? 'signature' : 'logo'}
+              onCancel={() => setStudioFile(null)}
+              onApply={handleStudioApply}
+            />
+          )}
         </>
       ) : null}
       {it.kind === 'patch' ? <p className="text-sm" style={{ color: 'var(--ink-2)' }}>Covers the old name printed on your certificate. Match its colour to the paper.</p> : null}

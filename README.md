@@ -172,6 +172,7 @@ All settings load from the root **`.env`** file:
 - **Spreadsheet Upload**: Upload any `.xlsx`, `.xls`, or `.csv` roster. Smart auto-mapping detects `Recipient Name`, `Event Name`, `Issue Date`, and `Email` columns automatically.
 
 ### 3. Precision Visual Editor & Canvas
+- Signature and logo studio: crop, remove background, recolour ink.
 - Drag-and-drop repositioning with 1px arrow-key micro-nudges (10px with Shift).
 - Interactive corner handles for resizing text boxes and logos.
 - Smart center-alignment snap guides.

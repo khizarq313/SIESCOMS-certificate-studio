@@ -4,6 +4,7 @@ export * from './metrics';
 export * from './templates';
 export * from './values';
 export * from './Certificate';
+export * from './editor/imageTools';
 
 /** Built-in art, served as static files by the API at /api/static/assets/<file>. */
 export const ASSET_FILES: Record<string, string> = { sun: 'sun.svg', badge: 'badge.png', campus: 'campus.png', sig: 'sig.png' };
