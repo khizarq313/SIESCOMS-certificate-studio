@@ -1,7 +1,15 @@
 import type { NextConfig } from 'next';
 
-const rawApi = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
-const API = rawApi.replace(/\/+$/, '');
+const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+const rawApi = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL;
+
+if (isProd && !rawApi) {
+  throw new Error(
+    'Production build failed: API_URL environment variable is required for production deployment on Vercel. Please set API_URL in your Vercel project settings (e.g. https://api-eta-six-63.vercel.app).'
+  );
+}
+
+const API = (rawApi || 'http://127.0.0.1:4000').replace(/\/+$/, '');
 
 const config: NextConfig = {
   transpilePackages: ['@siescoms/certificate'],
@@ -10,7 +18,7 @@ const config: NextConfig = {
   async rewrites() {
     return [{ source: '/api/:path*', destination: `${API}/api/:path*` }];
   },
-  experimental: { proxyClientMaxBodySize: '30mb' },
+  experimental: { proxyClientMaxBodySize: '4.5mb' },
 };
 
 export default config;

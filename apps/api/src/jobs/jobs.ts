@@ -3,14 +3,17 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { ZipArchive, type Archiver } from 'archiver';
 import { PDFDocument } from 'pdf-lib';
 import { z } from 'zod';
 import nodemailer from 'nodemailer';
+import { GridFSBucket } from 'mongodb';
+import { waitUntil } from '@vercel/functions';
 import { DesignSchema, certificateFileName, emailOk, placeholderValues, rowValues, safeFileStem, type Design } from '@siescoms/certificate';
 import { renderer } from '../render/renderer';
 import { buildMessage, createMailer, friendlyMailError, type Mailer } from '../services/emailService';
-import { FILES_DIR, GENERATED_DIR, safePath } from '../utils/fileStorage';
+import { FILES_DIR, GENERATED_DIR, mimeFor, safePath } from '../utils/fileStorage';
 import { MAX_ROWS } from '../services/excelParser';
 import { getDb } from '../storage/db';
 
@@ -182,6 +185,31 @@ async function runDownload(job: Job, req: JobRequest) {
     fs.writeFileSync(outPath, await doc.save());
   }
   job.file = { path: outPath, name: outName };
+
+  // Persist generated output to MongoDB GridFS for multi-instance serverless resilience
+  const db = await getDb();
+  if (db && fs.existsSync(outPath)) {
+    try {
+      const bucket = new GridFSBucket(db, { bucketName: 'generated' });
+      const existing = await bucket.find({ filename: job.id }).toArray();
+      for (const f of existing) {
+        await bucket.delete(f._id);
+      }
+      const fileBuf = fs.readFileSync(outPath);
+      const uploadStream = bucket.openUploadStream(job.id, {
+        metadata: { contentType: mimeFor(outName), originalName: outName },
+      });
+      const readable = new Readable();
+      readable.push(fileBuf);
+      readable.push(null);
+      await new Promise<void>((resolve, reject) => {
+        readable.pipe(uploadStream).on('finish', resolve).on('error', reject);
+      });
+    } catch (err) {
+      console.warn(`GridFS save failed for generated job ${job.id}:`, err);
+    }
+  }
+
   await persistJob(job);
 }
 
@@ -232,10 +260,26 @@ export function startJob(req: JobRequest): Job {
   };
   persistJob(job).catch(() => {});
   const run = req.delivery === 'email' ? runEmail(job, req) : runDownload(job, req);
-  run.then(
-    () => { job.status = job.cancel ? 'cancelled' : 'done'; persistJob(job).catch(() => {}); },
-    (err) => { job.status = 'failed'; job.error = friendlyError(err); console.error('Job failed:', err); persistJob(job).catch(() => {}); },
+  const runPromise = run.then(
+    async () => {
+      job.status = job.cancel ? 'cancelled' : 'done';
+      await persistJob(job);
+    },
+    async (err) => {
+      job.status = 'failed';
+      job.error = friendlyError(err);
+      console.error('Job failed:', err);
+      await persistJob(job);
+    },
   );
+
+  // Extend execution lifetime in Vercel Serverless environment
+  if (process.env.VERCEL) {
+    try {
+      waitUntil(runPromise);
+    } catch {}
+  }
+
   return job;
 }
 

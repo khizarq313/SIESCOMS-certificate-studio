@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { chromium, type Browser, type Page, type Route } from 'playwright';
+import type { Browser, Page, Route } from 'playwright-core';
 import { PDFDocument, degrees } from 'pdf-lib';
 import { ASSET_FILES, Certificate, fontFamilyName, fontsUsed, type Design, type Values } from '@siescoms/certificate';
 import { FILES_DIR, mimeFor, safePath } from '../utils/fileStorage';
@@ -74,11 +74,31 @@ class Renderer {
 
   private launch(): Promise<Browser> {
     if (!this.browser) {
-      this.browser = chromium.launch({ args: ['--font-render-hinting=none', '--disable-gpu'] }).then((b) => {
-        // Pages still in use give their slot back when their render fails; only idle ones are dropped here.
-        b.on('disconnected', () => { this.browser = null; this.total -= this.idle.length; this.idle = []; });
-        return b;
-      });
+      this.browser = (async () => {
+        let browser: Browser;
+        if (process.env.VERCEL) {
+          const chromiumMod = await import('@sparticuz/chromium');
+          const chromium = chromiumMod.default || chromiumMod;
+          const { chromium: playwrightChromium } = await import('playwright-core');
+          const executablePath = await chromium.executablePath();
+          browser = await playwrightChromium.launch({
+            args: [...chromium.args, '--font-render-hinting=none'],
+            executablePath,
+            headless: true,
+          });
+        } else {
+          const { chromium } = await import('playwright');
+          browser = await chromium.launch({
+            args: ['--font-render-hinting=none', '--disable-gpu'],
+          });
+        }
+        browser.on('disconnected', () => {
+          this.browser = null;
+          this.total -= this.idle.length;
+          this.idle = [];
+        });
+        return browser;
+      })();
       this.browser.catch(() => { this.browser = null; });
     }
     return this.browser;

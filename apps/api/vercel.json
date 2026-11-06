@@ -1,7 +1,9 @@
 {
+  "framework": null,
   "functions": {
     "api/index.ts": {
-      "includeFiles": "dist/**, assets/**, fonts/**, fonts.css, public/**"
+      "maxDuration": 60,
+      "includeFiles": "{dist/**,../../packages/certificate/{assets/**,fonts/**,fonts.css}}"
     }
   },
   "rewrites": [

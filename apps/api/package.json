@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "src/index.ts",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
-    "dev": "tsx watch --clear-screen=false src/index.ts",
+    "dev": "tsx watch --clear-screen=false src/server.ts",
     "build": "node scripts/build.mjs",
     "start": "NODE_ENV=production node dist/index.js",
     "setup:browser": "playwright install chromium",
@@ -14,6 +16,8 @@
   },
   "dependencies": {
     "@siescoms/certificate": "*",
+    "@sparticuz/chromium": "^153.0.0",
+    "@vercel/functions": "^3.11.0",
     "archiver": "^8.0.0",
     "cookie-parser": "^1.4.7",
     "express": "^4.21.2",
@@ -25,9 +29,9 @@
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.5.438",
     "playwright": "^1.64.1",
+    "playwright-core": "^1.64.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tsx": "^4.19.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.6.7"
   },
@@ -42,6 +46,7 @@
     "@types/supertest": "^6.0.2",
     "esbuild": "^0.28.2",
     "supertest": "^7.0.0",
+    "tsx": "^4.19.2",
     "vite": "^6.4.5",
     "vitest": "^5.1.0"
   }

@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { PDFDocument } from 'pdf-lib';
+import { GridFSBucket } from 'mongodb';
 import { DesignSchema } from '@siescoms/certificate';
 import { uploadBackground, uploadImage, uploadSpreadsheet } from '../middleware/uploadMiddleware';
 import {
@@ -20,11 +22,22 @@ import { systemMailConfigured, verifySmtp } from '../services/emailService';
 import { deleteDesign, getDesign, listDesigns, saveDesign } from '../designStore';
 import { JobRequestSchema, getJob, jobView, reportCsv, startJob } from '../jobs/jobs';
 import { env } from '../config/env';
+import { getDb } from '../storage/db';
 
 type Handler = (req: Request, res: Response, next: NextFunction) => unknown;
 /** Passes async errors to the error handler. */
 const h = (fn: Handler): Handler => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const bad = (res: Response, error: string, status = 400) => res.status(status).json({ error });
+
+const requireMongoOnVercel = (res: Response): boolean => {
+  if (process.env.VERCEL && !env.mongoUri) {
+    res.status(500).json({
+      error: 'MONGODB_URI is required in production on Vercel. Please configure MONGODB_URI in Vercel project environment variables.'
+    });
+    return false;
+  }
+  return true;
+};
 
 /** Streams a stored file. If it vanished after the existence check, answers 404 instead of crashing. */
 function streamFile(res: Response, file: string) {
@@ -42,6 +55,7 @@ export const api = Router();
 
 // ---------- uploads
 api.post('/uploads/background', uploadBackground.single('file'), h(async (req, res) => {
+  if (!requireMongoOnVercel(res)) return;
   const f = req.file;
   if (!f) return bad(res, 'No file was received.');
   const type = detectMagicBytes(f.buffer);
@@ -69,51 +83,69 @@ api.get('/uploads/background/:key/page/:index', h(async (req, res) => {
 }));
 
 api.post('/uploads/image', uploadImage.single('file'), h(async (req, res) => {
+  if (!requireMongoOnVercel(res)) return;
   const f = req.file;
   if (!f) return bad(res, 'No file was received.');
   const type = detectMagicBytes(f.buffer);
   if (type !== 'png' && type !== 'jpg') return bad(res, 'Images must be PNG or JPG.');
-  const doc = await PDFDocument.create();
-  const img = type === 'png' ? await doc.embedPng(f.buffer) : await doc.embedJpg(f.buffer);
   const key = `${crypto.randomUUID()}.${type}`;
   await persistUploadedFile(key, f.buffer);
-  res.json({ key, width: img.width, height: img.height });
+  let width: number | undefined;
+  let height: number | undefined;
+  try {
+    const doc = await PDFDocument.create();
+    const img = type === 'png' ? await doc.embedPng(f.buffer) : await doc.embedJpg(f.buffer);
+    width = img.width;
+    height = img.height;
+  } catch {}
+  res.json({ key, fileKey: key, fileName: f.originalname, width, height });
 }));
 
+const handleSpreadsheet = (req: Request, res: Response) => {
+  if (!requireMongoOnVercel(res)) return;
+  const f = req.file;
+  if (!f) return bad(res, 'No file was received.');
+  try {
+    const parsed = parseSpreadsheet(f.buffer, f.originalname);
+    res.json({ fileName: f.originalname, ...parsed });
+  } catch (err) {
+    bad(res, (err as Error).message || "That spreadsheet couldn't be read.");
+  }
+};
+
+api.post('/spreadsheets/parse', uploadSpreadsheet.single('file'), handleSpreadsheet);
+api.post('/uploads/spreadsheet', uploadSpreadsheet.single('file'), handleSpreadsheet);
+
 api.get('/files/:key', h(async (req, res) => {
-  const file = await ensureFileExists(String(req.params.key));
+  const key = String(req.params.key);
+  const file = await ensureFileExists(key);
   if (!file || !fs.existsSync(file)) return bad(res, 'File not found.', 404);
   res.setHeader('Content-Type', mimeFor(file));
-  res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+  res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
   streamFile(res, file);
 }));
 
-// ---------- recipients
-api.post('/spreadsheets/parse', uploadSpreadsheet.single('file'), (req, res) => {
-  if (!req.file) return bad(res, 'No file was received.');
-  const parsed = parseSpreadsheet(req.file.buffer, req.file.originalname);
-  res.json({ fileName: req.file.originalname, ...parsed });
-});
-
-// ---------- designs (autosave)
+// ---------- designs
 api.get('/designs', h(async (_req, res) => {
   res.json(await listDesigns());
 }));
 
 api.get('/designs/:id', h(async (req, res) => {
-  const rec = await getDesign(String(req.params.id));
-  if (!rec) return bad(res, 'Design not found.', 404);
-  res.json(rec);
+  const d = await getDesign(String(req.params.id));
+  if (!d) return bad(res, 'Design not found.', 404);
+  res.json(d);
 }));
 
 api.post('/designs', h(async (req, res) => {
-  const parsed = DesignSchema.safeParse(req.body?.design);
+  const raw = req.body?.design ?? req.body;
+  const parsed = DesignSchema.safeParse(raw);
   if (!parsed.success) return bad(res, 'That design has invalid parts.');
   res.json(await saveDesign(parsed.data));
 }));
 
 api.put('/designs/:id', h(async (req, res) => {
-  const parsed = DesignSchema.safeParse(req.body?.design);
+  const raw = req.body?.design ?? req.body;
+  const parsed = DesignSchema.safeParse(raw);
   if (!parsed.success) return bad(res, 'That design has invalid parts.');
   const id = String(req.params.id);
   if (!/^[\w-]{1,64}$/.test(id)) return bad(res, 'Invalid id.');
@@ -141,6 +173,7 @@ api.post('/email/test', h(async (req, res) => {
 
 // ---------- jobs
 api.post('/jobs', h(async (req, res) => {
+  if (!requireMongoOnVercel(res)) return;
   const parsed = JobRequestSchema.safeParse(req.body);
   if (!parsed.success) return bad(res, `The request was incomplete: ${parsed.error.issues[0]?.path.join('.')} ${parsed.error.issues[0]?.message}`);
   const r = parsed.data;
@@ -177,10 +210,32 @@ api.post('/jobs/:id/cancel', h(async (req, res) => {
 
 api.get('/jobs/:id/file', h(async (req, res) => {
   const job = await getJob(String(req.params.id));
-  if (!job?.file || !fs.existsSync(job.file.path)) return bad(res, 'That file has expired. Make the certificates again.', 404);
-  res.setHeader('Content-Type', mimeFor(job.file.path));
+  if (!job?.file) return bad(res, 'That file has expired. Make the certificates again.', 404);
+  let filePath = job.file.path;
+  if (!fs.existsSync(filePath)) {
+    const db = await getDb();
+    if (db) {
+      try {
+        const bucket = new GridFSBucket(db, { bucketName: 'generated' });
+        const files = await bucket.find({ filename: job.id }).limit(1).toArray();
+        if (files.length > 0) {
+          const dir = path.dirname(filePath);
+          fs.mkdirSync(dir, { recursive: true });
+          const downloadStream = bucket.openDownloadStreamByName(job.id);
+          const writeStream = fs.createWriteStream(filePath);
+          await new Promise<void>((resolve, reject) => {
+            downloadStream.pipe(writeStream).on('finish', resolve).on('error', reject);
+          });
+        }
+      } catch (err) {
+        console.warn(`GridFS retrieval failed for job ${job.id}:`, err);
+      }
+    }
+  }
+  if (!fs.existsSync(filePath)) return bad(res, 'That file has expired. Make the certificates again.', 404);
+  res.setHeader('Content-Type', mimeFor(filePath));
   res.setHeader('Content-Disposition', contentDisposition(job.file.name));
-  streamFile(res, job.file.path);
+  streamFile(res, filePath);
 }));
 
 api.get('/jobs/:id/report.csv', h(async (req, res) => {
@@ -188,5 +243,5 @@ api.get('/jobs/:id/report.csv', h(async (req, res) => {
   if (!job) return bad(res, 'That batch has expired.', 404);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', contentDisposition(job.kind === 'email' ? 'delivery_report.csv' : 'certificates_report.csv'));
-  res.send('﻿' + reportCsv(job));
+  res.send('\uFEFF' + reportCsv(job));
 }));

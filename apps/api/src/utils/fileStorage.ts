@@ -48,9 +48,11 @@ const MIME: Record<string, string> = {
   '.pdf': 'application/pdf',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
   '.zip': 'application/zip',
   '.css': 'text/css',
   '.ttf': 'font/ttf',
+  '.woff2': 'font/woff2',
   '.svg': 'image/svg+xml',
 };
 export const mimeFor = (file: string) => MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';

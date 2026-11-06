@@ -7,6 +7,9 @@ describe('production bundle and vercel entry point verification', () => {
 
   beforeAll(async () => {
     process.env.VERCEL = '1';
+    delete process.env.SESSION_SECRET;
+    delete process.env.MONGODB_URI;
+
     // Import the compiled production bundle
     // @ts-ignore
     const bundle = await import('../dist/index.js');
@@ -63,6 +66,7 @@ describe('production bundle and vercel entry point verification', () => {
     expect(r1.status).toBe(200);
     expect(r1.headers['content-type']).toContain('text/css');
     expect(r1.text).toContain('@font-face');
+    expect(r1.text).toContain('woff2');
 
     const r2 = await request(app).get('/static/fonts.css');
     expect(r2.status).toBe(200);
@@ -72,12 +76,27 @@ describe('production bundle and vercel entry point verification', () => {
   it('serves built-in static asset sun.svg from bundled app', async () => {
     const res = await request(app).get('/api/static/assets/sun.svg');
     expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('svg');
+  });
+
+  it('serves built-in woff2 font GreatVibes.woff2 with correct mime type', async () => {
+    const res = await request(app).get('/api/static/fonts/GreatVibes.woff2');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('font/woff2');
   });
 
   it('handles unauthenticated /api/auth/me cleanly', async () => {
     const res = await request(app).get('/api/auth/me');
     expect(res.status).toBe(200);
     expect(res.body.signedIn).toBe(false);
+  });
+
+  it('enforces SESSION_SECRET in production / Vercel during login with clear 500 error', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ password: 'any' });
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('SESSION_SECRET');
   });
 
   it('executes Vercel serverless function entrypoint handler directly via supertest', async () => {
