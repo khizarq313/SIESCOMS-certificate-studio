@@ -48,6 +48,23 @@ function useDetailChips() {
     { t: 'line', kind: 'line', label: 'Line', make: (n) => [Ln(X(336 + dx), Y(380 + n * 14), X(170), L.ink, 0.67)] },
     { t: 'roll_number', label: 'Roll number / ID', once: true, make: () => [mk('roll_number', POS.roll_number[0] + dx, POS.roll_number[1])] },
     { t: 'custom_text', label: 'Extra text', make: (n) => [mk('custom_text', POS.custom_text[0] + dx + n * 16, POS.custom_text[1] + n * 24)] },
+    {
+      t: 'paragraph_text',
+      label: 'Paragraph text',
+      make: (n) => {
+        const item = mk('custom_text', POS.custom_text[0] + dx + n * 16, POS.custom_text[1] + 40 + n * 24);
+        item.label = `Paragraph ${n + 1}`;
+        item.w = 360;
+        item.h = 60;
+        if (item.kind === 'field') {
+          item.defaultValue = 'Add descriptive paragraph text here. Long text will wrap across multiple lines within this text box.';
+          item.style.wrap = true;
+          item.style.fontSize = 12;
+          item.style.lineHeight = 1.35;
+        }
+        return [item];
+      },
+    },
   ];
   const chips = CH.map((c) => {
     const n = c.kind ? items.filter((i) => i.kind === c.kind).length : cnt(c.t);

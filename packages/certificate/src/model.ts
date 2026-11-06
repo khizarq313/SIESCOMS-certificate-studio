@@ -22,6 +22,11 @@ export const TextStyleSchema = z.object({
   autoShrink: z.boolean(),
   minFontSize: num.min(1).max(400),
   letterSpacing: num,
+  lineHeight: num.min(0.8).max(3).optional(),
+  underline: z.boolean().optional(),
+  uppercase: z.boolean().optional(),
+  shadow: z.boolean().optional(),
+  wrap: z.boolean().optional(),
 });
 
 const base = {

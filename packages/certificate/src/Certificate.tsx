@@ -56,12 +56,22 @@ export function SiesLockup({ width, page, sun }: { width: number; page: PageSize
 
 function FieldText({ it, text, page }: { it: FieldItem; text: string; page: PageSize }) {
   const st = it.style;
+  const processedText = st.uppercase ? text.toUpperCase() : text;
   return (
     <div style={{
       fontFamily: fontCss(st.fontFamily), fontSize: cqw(displaySize(it, text), page.w),
       fontWeight: st.isBold ? 700 : 400, fontStyle: st.isItalic ? 'italic' : 'normal', color: st.color,
-      letterSpacing: cqw(st.letterSpacing || 0, page.w), whiteSpace: 'nowrap', lineHeight: 1.15, width: '100%', textAlign: st.alignment,
-    }}>{text}</div>
+      letterSpacing: cqw(st.letterSpacing || 0, page.w),
+      whiteSpace: st.wrap ? 'pre-wrap' : 'nowrap',
+      overflowWrap: st.wrap ? 'break-word' : undefined,
+      lineHeight: st.lineHeight ?? 1.15,
+      width: '100%',
+      textAlign: st.alignment,
+      textDecoration: st.underline ? 'underline' : undefined,
+      textUnderlineOffset: st.underline ? '0.14em' : undefined,
+      textDecorationThickness: st.underline ? '0.06em' : undefined,
+      textShadow: st.shadow ? '0 0.04em 0.08em rgba(0,0,0,0.28)' : undefined,
+    }}>{processedText}</div>
   );
 }
 
@@ -71,7 +81,12 @@ export function CertItem({ it, values, page, resolveSrc }: { it: Item; values: V
   switch (it.kind) {
     case 'field': {
       const al = it.style.alignment || 'center';
-      Object.assign(box, { display: 'flex', alignItems: 'center', justifyContent: al === 'left' ? 'flex-start' : al === 'right' ? 'flex-end' : 'center' });
+      const isWrap = !!it.style.wrap;
+      Object.assign(box, {
+        display: 'flex',
+        alignItems: isWrap ? 'flex-start' : 'center',
+        justifyContent: al === 'left' ? 'flex-start' : al === 'right' ? 'flex-end' : 'center',
+      });
       return <div style={box} data-item={it.id}><FieldText it={it} text={fieldText(it, values)} page={page} /></div>;
     }
     case 'shape': {
