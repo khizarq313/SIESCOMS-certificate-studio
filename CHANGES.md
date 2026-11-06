@@ -26,9 +26,22 @@ This update fixes the static routing collision on Vercel where the API was servi
 - Hoisted `@sparticuz/chromium/bin` files are linked to `apps/api/node_modules/@sparticuz/chromium/bin`.
 - `includeFiles` in `vercel.json` packages `{bundle/**,runtime-assets/**,node_modules/@sparticuz/chromium/bin/**}`.
 
+### CJS/ESM Interop & createRequire Banner
+- **Root Cause of `server_boot_failed`**: Bundling Express and CommonJS dependencies (`body-parser`, `depd`, `content-type`, etc.) into an ES-module bundle (`format: 'esm'`) caused esbuild to transform internal `require(...)` calls into dynamic requires (`__require`). In plain Node 22 ESM runtime, this threw `TypeError: Dynamic require of "path" is not supported` during bundle evaluation.
+- **Solution**:
+  1. Injected an esbuild banner in `apps/api/scripts/build.mjs`:
+     ```javascript
+     banner: {
+       js: 'import { createRequire as __cr } from "node:module";\nconst require = __cr(import.meta.url);',
+     }
+     ```
+  2. Intentionally omitted `__dirname` and `__filename` shims to preserve accurate asset directory resolution in `src/paths.ts`.
+  3. Integrated a standalone plain-Node smoke test (`apps/api/scripts/smoke.mjs`) into `npm run build` that boots the bundle under `NODE_ENV=production` and validates `/`, `/health`, `/api/health`, `/api/static/fonts.css`, fonts, art, 404 security guards, and unauthenticated auth endpoints.
+  4. Updated `apps/api/api/index.ts` to reset `appPromise = null` on rejected imports, allowing subsequent serverless requests to retry instead of permanently caching the failed promise.
+
 ### Visible Serverless Boot Failures
 - `apps/api/api/index.ts` lazily imports `../bundle/index.js` inside the handler with a cached promise.
-- Cold-start boot errors are caught, logged via `console.error` to appear in Vercel Runtime Logs, and return a clean JSON response `{"error":"server_boot_failed"}` with HTTP 500 (with stack trace details if `DEBUG_BOOT=1`).
+- Cold-start boot errors are caught, logged via `console.error` to appear in Vercel Runtime Logs, and return a clean JSON response `{"error":"server_boot_failed","message":...}` with HTTP 500 (with stack trace details if `DEBUG_BOOT=1`).
 
 ### Web-to-API Communication & Authentication
 - Confirmed that the browser only calls same-origin `/api/*`, which Next.js rewrites to `API_URL`.
@@ -56,10 +69,11 @@ This update fixes the static routing collision on Vercel where the API was servi
 
 | Test / Scenario | Local Verification Status | Production Verification Required |
 | :--- | :--- | :--- |
+| **Plain-Node Bundle Smoke Test (`smoke.mjs`)** | **PASSED** (8 checks verified in plain Node 22) | Automated in `npm run build` |
 | **Full Typecheck (`npm run typecheck`)** | **PASSED** (0 errors across 3 workspaces) | N/A |
-| **Unit & Integration Suite (`apps/api`)** | **ALL 35 TESTS PASSED** | N/A |
+| **Unit & Integration Suite (`apps/api`)** | **ALL 35 TESTS PASSED** (13 bundle + 22 API tests) | N/A |
 | **Vector PDF Render & Stamp** | **PASSED** (`tests/api.test.ts`) | Verify in preview preview |
-| **Bundle Import & Root JSON Response** | **PASSED** (`GET /` returns 200 JSON, not JS code) | Verify via curl on Vercel URL |
+| **Bundle Import & Root JSON Response** | **PASSED** (`GET /` & `/health` return 200 JSON) | Verify via curl on Vercel URL |
 | **Static Source Protection** | **PASSED** (`/bundle/*`, `/src/*`, `/package.json` return 404 JSON) | Verify via curl on Vercel URL |
 | **Next.js Production Build (`apps/web`)** | **PASSED** (Turbopack static optimization) | Automated in Vercel build |
 | **Missing `API_URL` Build Guard** | **PASSED** (Explicit failure with guidance) | N/A |

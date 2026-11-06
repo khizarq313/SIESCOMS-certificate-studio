@@ -8,10 +8,11 @@
   },
   "scripts": {
     "dev": "tsx watch --clear-screen=false src/server.ts",
-    "build": "node scripts/build.mjs",
+    "build": "node scripts/build.mjs && node scripts/smoke.mjs",
+    "smoke": "node scripts/smoke.mjs",
     "start": "NODE_ENV=production node bundle/index.js",
     "setup:browser": "playwright install chromium",
-    "test": "vitest run",
+    "test": "npm run build && vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

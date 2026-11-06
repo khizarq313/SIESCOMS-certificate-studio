@@ -107,6 +107,9 @@ try {
       '@vercel/functions',
       'pdfjs-dist',
     ],
+    banner: {
+      js: 'import { createRequire as __cr } from "node:module";\nconst require = __cr(import.meta.url);',
+    },
     sourcemap: true,
     logLevel: 'warning',
     loader: {
