@@ -103,8 +103,8 @@ function useStepUrl() {
     const onPop = () => {
       const slug = new URLSearchParams(location.search).get('step') || 'start';
       const n = (STEP_SLUGS.indexOf(slug as never) + 1 || 1) as Step;
-      const { maxStep, set } = useApp.getState();
-      set({ step: (n <= maxStep ? n : 1) as Step, sel: null });
+      const { maxStep, set, select } = useApp.getState();
+      set({ step: (n <= maxStep ? n : 1) as Step, sel: null, selIds: [] });
     };
     window.addEventListener('popstate', onPop);
     if (new URLSearchParams(location.search).get('step')) history.replaceState({ step: 1 }, '', location.pathname);

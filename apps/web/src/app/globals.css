@@ -682,4 +682,137 @@ div[data-nextjs-dev-indicator] {
   z-index: 10;
 }
 
+/* Phase 4: Multi-select toolbar and layers */
+.selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: #ffffff;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  flex-wrap: wrap;
+  font-size: 13px;
+  z-index: 20;
+}
+
+.sel-bar-title {
+  font-weight: 600;
+  color: var(--ink, #0f172a);
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sel-bar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border, #e2e8f0);
+  margin: 0 4px;
+}
+
+.sel-bar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sel-bar-label {
+  font-size: 11px;
+  color: var(--muted-2, #94a3b8);
+  margin-right: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.sel-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-2, #475569);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sel-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: var(--ink, #0f172a);
+  border-color: #e2e8f0;
+}
+
+.sel-btn.on {
+  background: #eff6ff;
+  color: #2563eb;
+  border-color: #bfdbfe;
+}
+
+.sel-btn.danger:hover:not(:disabled) {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.sel-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.layer.dimmed {
+  opacity: 0.45;
+}
+
+.layer.drop-target {
+  border-top: 2px solid #2563eb;
+}
+
+.layer-handle {
+  cursor: grab;
+  touch-action: none;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  padding: 0 2px;
+}
+
+.layer-btn {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted-2, #64748b);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all 0.15s;
+}
+
+.layer-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--ink, #0f172a);
+}
+
+.layer-btn.on {
+  color: var(--accent, #2563eb);
+}
+
+.layer-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.hit.locked {
+  border: 1.5px dashed #94a3b8 !important;
+  pointer-events: none !important;
+}
+
+
 
