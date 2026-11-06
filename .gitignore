@@ -18,7 +18,10 @@ apps/web/.next/
 # Build artifacts & logs
 dist/
 apps/api/dist/
-apps/api/public/
+apps/api/bundle/
+apps/api/runtime-assets/
+apps/api/public/*
+!apps/api/public/robots.txt
 build/
 apps/api/api/*.js
 apps/api/assets/

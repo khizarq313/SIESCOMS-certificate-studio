@@ -75,7 +75,7 @@ authRouter.post('/login', rateLimit({ windowMs: 15 * 60_000, limit: 20, standard
       return;
     }
     const token = makeToken();
-    const isCrossDomain = process.env.COOKIE_SAMESITE === 'none' || (process.env.NODE_ENV === 'production' && process.env.COOKIE_SAMESITE !== 'lax');
+    const isCrossDomain = process.env.COOKIE_SAMESITE === 'none';
     res.cookie(COOKIE, token, {
       httpOnly: true,
       sameSite: isCrossDomain ? 'none' : 'lax',
@@ -87,7 +87,7 @@ authRouter.post('/login', rateLimit({ windowMs: 15 * 60_000, limit: 20, standard
   });
 
 authRouter.post('/logout', (_req, res) => {
-  const isCrossDomain = process.env.COOKIE_SAMESITE === 'none' || (process.env.NODE_ENV === 'production' && process.env.COOKIE_SAMESITE !== 'lax');
+  const isCrossDomain = process.env.COOKIE_SAMESITE === 'none';
   res.clearCookie(COOKIE, {
     path: '/',
     sameSite: isCrossDomain ? 'none' : 'lax',

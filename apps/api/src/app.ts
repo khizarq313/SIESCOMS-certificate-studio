@@ -120,7 +120,11 @@ export function createApp() {
   app.get('/static/fonts/:name', serveFont);
 
   app.use('/api', requireAuth, api);
-  app.use('/api', (_req, res) => { res.status(404).json({ error: 'Not found.' }); });
+
+  // Catch-all 404 handler for any unhandled routes (ensures JSON 404 for /dist/*, /bundle/*, /src/*, /package.json, etc.)
+  app.use((_req, res) => {
+    res.status(404).json({ error: 'Not found.' });
+  });
 
   app.use((err: Error & { status?: number; code?: string }, req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof multer.MulterError) {

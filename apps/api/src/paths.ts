@@ -5,7 +5,13 @@ const baseDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 
 function findPkgDir(): string {
   const candidates = [
-    // Monorepo packages/certificate directory from various working directories
+    // 1. Dedicated runtime-assets inside apps/api (isolated serverless container deployment)
+    path.resolve(process.cwd(), 'runtime-assets'),
+    path.resolve(process.cwd(), 'apps/api/runtime-assets'),
+    path.resolve(baseDir, 'runtime-assets'),
+    path.resolve(baseDir, '../runtime-assets'),
+    path.resolve(baseDir, '../../runtime-assets'),
+    // 2. Monorepo packages/certificate directory from various working directories
     path.resolve(process.cwd(), '../../packages/certificate'),
     path.resolve(process.cwd(), '../packages/certificate'),
     path.resolve(process.cwd(), 'packages/certificate'),

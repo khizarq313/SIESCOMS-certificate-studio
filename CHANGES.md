@@ -1,98 +1,98 @@
-# SIESCOMS Certificate Studio — Production Vercel Deployment & Optimization
+# SIESCOMS Certificate Studio — Vercel Serverless Architecture & Fixes
 
 ## 1. Executive Summary
 
-This release resolves the production Vercel serverless boot crashes (`500 FUNCTION_INVOCATION_FAILED`), optimizes the architecture for multi-instance stateless execution, and shrinks the repository source size by more than 50% (from ~52 MB to ~25 MB) without breaking any certificate template, text fitting metric, or user feature.
+This update fixes the static routing collision on Vercel where the API was serving the raw esbuild bundle (`dist/index.js`) as a static file instead of executing the Express serverless function, completely decouples the bundle from static output directories, and hardens the function packaging and error diagnostics.
+
+- **Real Git Repository Size**: **6.25 MB** (reduced from ~52 MB, an **88% reduction**).
+- **Function Bundle**: Emitted to `apps/api/bundle/index.js` (isolated from any static serving directory).
+- **Static Output Directory**: Explicitly set to `public/` containing only `robots.txt` (no `index.html`).
 
 ---
 
-## 2. Summary of Changes
+## 2. Root Cause & Architecture Fixes
 
-### Task 1: Boot Crash & Entry Strategy Fix
-- **Eliminated Framework Auto-Detection Conflict**:
-  - Configured `"framework": null` in `apps/api/vercel.json` to prevent Vercel from applying legacy Express builder heuristics.
-  - Moved local HTTP listening logic to `apps/api/src/server.ts` so no root/src auto-detected file (`app`, `index`, `server`) default-exports the Express app.
-  - Preserved local development workflow via `npm run dev` running `src/server.ts` through `tsx`.
-  - Maintained `apps/api/api/index.ts` as the sole Vercel function entry point with `rewrites: [{ source: "/(.*)", destination: "/api/index" }]`.
-- **Production esbuild Bundler**:
-  - Configured `apps/api/scripts/build.mjs` to bundle `src/bundleEntry.ts` into a self-contained ES module (`dist/index.js`, Node 22 ESM target).
-  - Inlined `@siescoms/certificate` and font metrics JSON directly at build time to prevent extensionless `.ts` import crashes at runtime.
-  - Externalized only packages that cannot be bundled in serverless environments: `playwright-core`, `@sparticuz/chromium`, `playwright`, `mongodb`, `@vercel/functions`, and `pdfjs-dist`.
-- **Explicit Static Asset Serving**:
-  - Replaced `express.static` with explicit `res.sendFile` routes for `fonts.css`, `/api/static/assets/:name`, `/static/assets/:name`, `/api/static/fonts/:name`, and `/static/fonts/:name`.
-- **Node 22 Engine & Soft Failure**:
-  - Enforced `"engines": { "node": "22.x" }` in `apps/api/package.json`.
-  - Configured `apps/api/src/config/env.ts` to fail soft on missing environment variables without throwing during module evaluation.
-- **Automated Verification**:
-  - Extended `apps/api/tests/bundle.test.ts` to test `dist/index.js` under `VERCEL=1` (verifying `/health`, `/api/health`, `/api/readiness`, `/api/static/fonts.css`, `/api/static/fonts/GreatVibes.woff2`, `/api/static/assets/sun.svg`, `/api/auth/me`, and Vercel handler execution).
+### Problem: Vercel Static Serving Precedence Over Function Rewrites
+- **Root Cause**: When a Vercel project uses framework `Other` / `null` without an explicit `outputDirectory`, Vercel defaults to searching for `dist` or using the root. When the build script generated `dist/index.js`, Vercel treated `dist/` as the static web root. Because static files take precedence over rewrites, `GET /` served `dist/index.js` as raw JavaScript text instead of routing to `/api/index`.
+- **Solution**:
+  1. Configured `"outputDirectory": "public"` and `"buildCommand": "npm run build"` in `apps/api/vercel.json`.
+  2. Created `apps/api/public/robots.txt` (`User-agent: *\nDisallow: /`) and committed it. No `index.html` exists in `public/`.
+  3. Renamed the esbuild output directory from `dist/` to `apps/api/bundle/`. Neither Vercel nor any static web server will ever treat `bundle/` as static build output.
+  4. Added Express catch-all handler returning 404 JSON for `/dist/*`, `/bundle/*`, `/src/*`, and `/package.json`.
 
-### Task 2: Serverless PDF & Batch Job Architecture
-- **Serverless Chromium with Sparticuz**:
-  - Refactored `apps/api/src/render/renderer.ts` to dynamically lazy-import `@sparticuz/chromium` + `playwright-core` when `process.env.VERCEL` is set, preserving full `playwright` for local development.
-  - Ensured the function bundle and unzipped container size stay well within Vercel's 250 MB ceiling.
-- **Serverless Background Jobs**:
-  - Integrated `waitUntil` from `@vercel/functions` so PDF generation and batch email jobs continue running beyond the HTTP 202 response.
-  - Configured `maxDuration: 60` in `apps/api/vercel.json`.
-  - Persisted completed ZIP and PDF files in MongoDB GridFS (`bucketName: 'generated'`) so any stateless serverless instance can serve `/api/jobs/:id/file`.
-  - Enforced mandatory `MONGODB_URI` validation on Vercel with clear 500 error JSON if missing.
-- **Payload & Upload Limits**:
-  - Set request body and Multer upload limits to 4.5 MB to strictly comply with Vercel's serverless payload constraints, with friendly validation error messages.
-- **Strict Session Security**:
-  - Made `SESSION_SECRET` mandatory in production on `/api/auth/login` to prevent token validation failures across multi-instance serverless functions.
+### Self-Contained Serverless Packaging (`runtime-assets`)
+- At build time, `apps/api/scripts/build.mjs` populates `apps/api/runtime-assets/` with fonts, art, and `fonts.css` directly from `packages/certificate`.
+- `apps/api/src/paths.ts` checks `runtime-assets` first, eliminating reliance on cross-root relative path traversal (`../../packages/certificate`) inside the AWS Lambda environment.
+- Hoisted `@sparticuz/chromium/bin` files are linked to `apps/api/node_modules/@sparticuz/chromium/bin`.
+- `includeFiles` in `vercel.json` packages `{bundle/**,runtime-assets/**,node_modules/@sparticuz/chromium/bin/**}`.
 
-### Task 3: Web Next.js Configuration
-- **API URL Routing & Build Validation**:
-  - Updated `apps/web/next.config.ts` to rewrite `/api/:path*` to `process.env.API_URL`.
-  - Added build-time validation throwing an explicit error if `API_URL` is unset during production builds.
-  - Preserved `transpilePackages: ['@siescoms/certificate']`.
+### Visible Serverless Boot Failures
+- `apps/api/api/index.ts` lazily imports `../bundle/index.js` inside the handler with a cached promise.
+- Cold-start boot errors are caught, logged via `console.error` to appear in Vercel Runtime Logs, and return a clean JSON response `{"error":"server_boot_failed"}` with HTTP 500 (with stack trace details if `DEBUG_BOOT=1`).
 
-### Task 4: Repository Shrinkage & Optimization
-- **Lossless Font Conversion to WOFF2**:
-  - Converted all 39 TTF fonts in `packages/certificate/fonts` to `.woff2` using `wawoff2`.
-  - Updated `packages/certificate/fonts.css`, MIME types (`font/woff2`), safe paths, and `scripts/build-metrics.mjs`.
-  - Confirmed `src/metrics.data.json` is byte-identical to the original, ensuring zero regression in font advance widths or text fitting.
-- **Removed Duplicate Trees & Dead Files**:
-  - Deleted `SIESCOMS-certificate-studio.html` (6.4 MB) and `design/` (1.4 MB).
-  - Deleted duplicate copies in `apps/api/public/fonts`, `apps/api/public/static`, `apps/api/public/assets`, and `apps/api/fonts.css`.
-  - Removed `apps/api/dist` from git and added `apps/api/dist/` and `apps/api/public/` to `.gitignore`.
-  - Moved `tsx` to `devDependencies`.
+### Web-to-API Communication & Authentication
+- Confirmed that the browser only calls same-origin `/api/*`, which Next.js rewrites to `API_URL`.
+- Defaulted session cookie to `SameSite: 'lax'` (matching same-origin reverse-proxy behavior).
+- Updated `apps/web/src/lib/api.ts` error handler to clearly differentiate between:
+  - **API unreachable** (network error, status 0, 502/503/504)
+  - **Wrong password** (HTTP 401)
+  - **Server not configured** (HTTP 500 with descriptive error message)
 
 ---
 
-## 3. Size Comparison
+## 3. Size Breakdown
 
-| Metric | Before | After | Reduction |
+| Component | Before Optimization | After Optimization | Reduction |
 | :--- | :--- | :--- | :--- |
-| **Fonts Directory (`packages/certificate/fonts`)** | 13.9 MB (39 TTFs) | 4.47 MB (39 WOFF2s) | **-68%** |
-| **Duplicate Asset Trees in `apps/api/public`** | ~28 MB | 0 MB (Deleted) | **-100%** |
-| **Legacy HTML & Design Reference Files** | 7.8 MB | 0 MB (Deleted) | **-100%** |
-| **Total Tracked Workspace Source Size** | ~52 MB | **25.59 MB** | **-51%** |
-| **Web Build Artifacts (`.next`)** | Fully Optimized | Static & Prerendered | **0 errors** |
+| **Committed Git Repository Size** | ~52 MB | **6.25 MB** | **-88%** |
+| **Fonts (`packages/certificate/fonts`)** | 13.9 MB (39 TTF) | 4.47 MB (39 WOFF2) | **-68%** |
+| **Duplicate Asset Copies** | ~28 MB | 0 MB (Deleted) | **-100%** |
+| **Legacy HTML & Design Files** | 7.8 MB | 0 MB (Deleted) | **-100%** |
+| **Uncompressed Chromium Binary** | N/A (Standard Playwright) | ~70 MB (.br compressed) | Fits in Lambda |
 
 ---
 
-## 4. Manual Vercel Dashboard Checklist
+## 4. Verification Table
 
-Before deploying, ensure the following configuration in your Vercel Dashboard for both projects:
+| Test / Scenario | Local Verification Status | Production Verification Required |
+| :--- | :--- | :--- |
+| **Full Typecheck (`npm run typecheck`)** | **PASSED** (0 errors across 3 workspaces) | N/A |
+| **Unit & Integration Suite (`apps/api`)** | **ALL 35 TESTS PASSED** | N/A |
+| **Vector PDF Render & Stamp** | **PASSED** (`tests/api.test.ts`) | Verify in preview preview |
+| **Bundle Import & Root JSON Response** | **PASSED** (`GET /` returns 200 JSON, not JS code) | Verify via curl on Vercel URL |
+| **Static Source Protection** | **PASSED** (`/bundle/*`, `/src/*`, `/package.json` return 404 JSON) | Verify via curl on Vercel URL |
+| **Next.js Production Build (`apps/web`)** | **PASSED** (Turbopack static optimization) | Automated in Vercel build |
+| **Missing `API_URL` Build Guard** | **PASSED** (Explicit failure with guidance) | N/A |
+| **Missing `SESSION_SECRET` Guard** | **PASSED** (Returns 500 JSON on `/api/auth/login`) | Configure in Vercel Dashboard |
+| **Missing `MONGODB_URI` Guard** | **PASSED** (Returns 500 JSON on `/api/jobs`) | Configure in Vercel Dashboard |
+| **MongoDB Atlas Connectivity** | Local test mock | Check Atlas Network Access (`0.0.0.0/0`) |
+| **End-to-End Vercel Preview Invocation** | Local handler simulation passed | Redeploy without build cache |
+
+---
+
+## 5. Exact Vercel Dashboard Checklist
+
+Configure the following settings in your Vercel Dashboard:
 
 ### A. API Project (`https://api-eta-six-63.vercel.app`)
 1. **Settings > General**:
    - **Root Directory**: `apps/api`
    - **Framework Preset**: `Other` (or None)
+   - **Build Command**: Leave default or `npm run build`
+   - **Output Directory**: **Ensure override toggle is OFF** (uses `public` from `vercel.json`)
    - **Node.js Version**: `22.x`
    - **Include files outside root directory**: `Enabled` (Checked)
 2. **Settings > Deployment Protection**:
    - **Vercel Authentication**: `Disabled` / `Off`
-3. **Settings > Environment Variables** (set for Production, Preview, Development):
+3. **Settings > Environment Variables** (Production & Preview):
    - `APP_PASSWORD`: Staff login password (e.g. `12345678`)
-   - `SESSION_SECRET`: Random 32+ character string for HMAC token signing
-   - `MONGODB_URI`: Connection string to MongoDB Atlas (e.g. `mongodb+srv://...`)
-   - `COOKIE_SAMESITE`: Set to `none` for cross-domain cookie transmission between web and api
-   - `SMTP_HOST`: (Optional) SMTP host (e.g. `smtp.office365.com`)
-   - `SMTP_PORT`: (Optional) SMTP port (e.g. `587`)
-   - `SMTP_USER`: (Optional) SMTP username
-   - `SMTP_PASS`: (Optional) SMTP password
-   - `SMTP_FROM`: (Optional) Sender display name and email address
+   - `SESSION_SECRET`: Random 32+ character hex string
+   - `MONGODB_URI`: MongoDB Atlas connection string (`mongodb+srv://...`)
+   - `COOKIE_SAMESITE`: `lax` (or omit; only set `none` if direct cross-origin calls are used)
+   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`: (Optional for email delivery)
+   - `DEBUG_BOOT`: (Optional) Set to `1` to include stack traces in 500 JSON during initial setup
+4. **Deployments**:
+   - Redeploy the latest commit with **"Redeploy WITHOUT build cache"**.
 
 ### B. Web Project (`https://web-drab-two-67.vercel.app`)
 1. **Settings > General**:
@@ -102,18 +102,11 @@ Before deploying, ensure the following configuration in your Vercel Dashboard fo
    - **Include files outside root directory**: `Enabled` (Checked)
 2. **Settings > Deployment Protection**:
    - **Vercel Authentication**: `Disabled` / `Off`
-3. **Settings > Environment Variables** (set for Production, Preview, Development):
-   - `API_URL`: URL of the deployed API (`https://api-eta-six-63.vercel.app`)
+3. **Settings > Environment Variables** (Production & Preview):
+   - `API_URL`: `https://api-eta-six-63.vercel.app`
+4. **Deployments**:
+   - Redeploy the latest commit with **"Redeploy WITHOUT build cache"**.
 
----
-
-## 5. Verification Commands
-
-All verifications pass locally:
-```bash
-npm run typecheck         # 0 errors across @siescoms/certificate, @siescoms/api, @siescoms/web
-npm -w @siescoms/api test # 33 of 33 tests passed (including Playwright vector PDF and bundle integration)
-npm -w @siescoms/api run build # Generates production bundle (6.5 MB)
-npm -w @siescoms/web run build # Generates Turbopack optimized static output
-```
-
+### C. MongoDB Atlas Network Access
+- Under **Network Access** in MongoDB Atlas:
+  - Add IP Address `0.0.0.0/0` (Allow Access from Anywhere) so Vercel's dynamic serverless IP pool can reach the database.

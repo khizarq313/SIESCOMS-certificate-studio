@@ -39,7 +39,23 @@ async function handle<T>(res: Response): Promise<T> {
     location.href = '/login';
   }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(body.error || "Couldn't reach the server. Is the API running?", res.status);
+  if (!res.ok) {
+    let errorMsg = body.error;
+    if (!errorMsg) {
+      if (res.status === 401) {
+        errorMsg = "That password isn't right.";
+      } else if (res.status === 500) {
+        errorMsg = 'Server encountered an internal error. Please check server logs.';
+      } else if (res.status === 502 || res.status === 503 || res.status === 504) {
+        errorMsg = 'API unreachable. The backend service may be starting up or down.';
+      } else {
+        errorMsg = `Server error (${res.status}).`;
+      }
+    } else if (errorMsg === 'server_boot_failed') {
+      errorMsg = 'Server boot failed. Please check Vercel function runtime logs.';
+    }
+    throw new ApiError(errorMsg, res.status);
+  }
   return body as T;
 }
 
@@ -55,7 +71,11 @@ export const api = {
     fetch(resolveApiUrl(url), {
       credentials: 'include',
       headers: defaultHeaders(),
-    }).then((r) => handle<T>(r)),
+    })
+      .catch(() => {
+        throw new ApiError('API unreachable. Could not connect to server.', 0);
+      })
+      .then((r) => handle<T>(r)),
 
   send: <T>(url: string, method: 'POST' | 'PUT' | 'DELETE', body?: unknown) =>
     fetch(resolveApiUrl(url), {
@@ -63,7 +83,11 @@ export const api = {
       credentials: 'include',
       headers: defaultHeaders(),
       body: body === undefined ? undefined : JSON.stringify(body),
-    }).then((r) => handle<T>(r)),
+    })
+      .catch(() => {
+        throw new ApiError('API unreachable. Could not connect to server.', 0);
+      })
+      .then((r) => handle<T>(r)),
 };
 
 /** Upload with progress (fetch can't report upload progress). */
