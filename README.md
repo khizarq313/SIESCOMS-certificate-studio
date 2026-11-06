@@ -1,6 +1,6 @@
 # SIESCOMS Certificate Studio
 
-A full-stack, enterprise-grade Certificate Template Designer, Batch Generation Engine, and Automated Email Dispatch System designed specifically for **SIES College of Management Studies (SIESCOMS)**. Import existing certificate templates (PDF/PNG/JPG) or choose from 16 built-in institution designs, customize dynamic typography and layout visually with precision coordinate alignment, generate personalized high-resolution vector PDF certificates, and deliver them directly via bulk email using Office 365, Outlook, or Gmail.
+A full-stack, enterprise-grade Certificate Template Designer, Batch Generation Engine, and Automated Email Dispatch System designed specifically for **SIES College of Management Studies (SIESCOMS)**. Import existing certificate templates (PDF/PNG/JPG) or choose from 20 built-in institution designs, customize dynamic typography and layout visually with precision coordinate alignment, generate personalized high-resolution vector PDF certificates, and deliver them directly via bulk email using Office 365, Outlook, or Gmail.
 
 ---
 
@@ -10,7 +10,7 @@ The project is structured as a high-performance **npm workspace monorepo**:
 
 - **Frontend (`apps/web`)**: Next.js 15 (App Router, Turbopack) with TypeScript, Framer Motion animations, Zustand state management, PDF.js rendering, and customized design system.
 - **Backend (`apps/api`)**: Node.js & Express.js REST API with TypeScript, Multer, `pdf-lib`, `xlsx` (SheetJS), `archiver` (ZIP stream packaging), Playwright chromium vector renderer, and `nodemailer`.
-- **Core Package (`packages/certificate`)**: Shared TypeScript models, Zod validation schemas, 16 official template definitions, SVG vector assets (SIES Sun logo, Silver Jubilee badge, campus illustration), text metrics, and coordinate calculation utilities.
+- **Core Package (`packages/certificate`)**: Shared TypeScript models, Zod validation schemas, 20 official template definitions, SVG vector assets (SIES Sun logo, Silver Jubilee badge, campus illustration), text metrics, and coordinate calculation utilities.
 
 ```
 SIESCOMS-certificate-studio/
@@ -40,7 +40,7 @@ SIESCOMS-certificate-studio/
 │   └── certificate/             # Shared Design & Typography Engine
 │       └── src/
 │           ├── Certificate.tsx  # Universal React vector certificate renderer
-│           ├── templates.ts     # 16 official template definitions on clean canvas
+│           ├── templates.ts     # 20 official template definitions on clean canvas
 │           ├── model.ts         # Zod schemas & TypeScript types for items & page
 │           ├── fonts.ts         # Multi-font typography definitions & fontkit
 │           ├── metrics.ts       # Font width estimation & auto-shrink math
@@ -153,7 +153,7 @@ All settings load from the root **`.env`** file:
 
 ## 5. Core Features & Capabilities
 
-### 1. 16 Official SIES Certificate Templates on Unified Clean Canvas
+### 1. 20 Official SIES Certificate Templates on Unified Clean Canvas
 - Every template is engineered on a unified, clean `#FFFFFF` canvas with crisp, contrasting typography and official college framing:
   - **Classic Gold**: Formal gold double frame, Cinzel lettering, MCA Silver Jubilee emblem.
   - **Midnight Navy**: Prestigious navy outer frame with gold inner border and deep navy Cinzel typography.
@@ -162,6 +162,10 @@ All settings load from the root **`.env`** file:
   - **Art Deco**: Elegant gold corner brackets, diamond ornaments, and formal typography.
   - **Sage Workshop**: Organic sage-green border accents for workshops and certifications.
   - **SIES Heritage, MCA 25, Rose, Bold Stripes, Minimal White, Ivory Merit, Teal Header, Graphite, Lavender, Crimson Scholar**.
+  - **Royal Blue Clean**: Formal royal blue dual frame with Allura script, hairline accents, and clean white layout.
+  - **Emerald & Gold**: Prestigious emerald frame with gold corner diamonds, Cinzel Decorative title, and Pinyon Script lettering.
+  - **Charcoal & Copper**: Modern corporate aesthetic featuring charcoal framing, copper corner brackets, and Cormorant Garamond typography.
+  - **Slate & Sky**: Airy layout with slate navy and sky blue accent rules, geometric ornaments, and flowing Italianno script.
 
 ### 2. Multi-Person Direct Entry (No Excel Required) & Spreadsheet Upload
 - **Direct Entry**: Generate certificates for 1 or multiple people directly inside the app without needing a spreadsheet. Click `+ Add another person` to dynamically add input fields for each recipient.
