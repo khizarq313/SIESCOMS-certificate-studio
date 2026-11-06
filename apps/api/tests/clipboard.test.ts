@@ -122,7 +122,6 @@ describe('Phase 5: Clipboard and cloning (clipboard.ts)', () => {
       w: 842,
       h: 595,
       opacity: 0.1,
-      blend: '',
     };
 
     const [clonedField, clonedImg] = cloneItems(

@@ -8,21 +8,19 @@ import { freeKey } from '../values';
 export function cloneItems(
   source: Item[],
   design: { items: Item[] },
-  offset: number | { dx: number; dy: number },
+  offset: number,
   makeId: () => string
 ): Item[] {
   if (source.length === 0) return [];
 
   const clones: Item[] = [];
   const evolvingItems = [...design.items];
-  const dx = typeof offset === 'number' ? offset : offset.dx;
-  const dy = typeof offset === 'number' ? offset : offset.dy;
 
   for (const it of source) {
     const c = structuredClone(it) as Item;
     c.id = makeId();
-    c.x = Math.round((c.x + dx) * 100) / 100;
-    c.y = Math.round((c.y + dy) * 100) / 100;
+    c.x = Math.round((c.x + offset) * 100) / 100;
+    c.y = Math.round((c.y + offset) * 100) / 100;
     c.locked = false;
     c.hidden = undefined;
 
@@ -44,3 +42,4 @@ export function cloneItems(
 
   return clones;
 }
+
