@@ -21,6 +21,8 @@ import { CertView } from '../common';
 import { ItemPopover } from './ItemPopover';
 import { SnapGuides } from './SnapGuides';
 import { SelectionBar } from './SelectionBar';
+import { ContextMenu } from './ContextMenu';
+import { ShortcutsHelp } from './ShortcutsHelp';
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const NUDGE = 1;
@@ -96,6 +98,43 @@ function useEditorKeys() {
         }
       }
 
+      // Clipboard & Duplicate shortcuts
+      if (mod && k === 'c') {
+        if (s.selIds.length > 0) {
+          e.preventDefault();
+          s.copy();
+          return;
+        }
+      }
+      if (mod && k === 'x') {
+        if (s.selIds.length > 0) {
+          e.preventDefault();
+          s.cut();
+          return;
+        }
+      }
+      if (mod && k === 'v') {
+        if (s.clipboard && s.clipboard.items.length > 0) {
+          e.preventDefault();
+          s.paste();
+          return;
+        }
+      }
+      if (mod && k === 'd') {
+        if (s.selIds.length > 0) {
+          e.preventDefault();
+          s.duplicateSelection();
+          return;
+        }
+      }
+
+      // Help shortcuts
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        s.setHelp(true);
+        return;
+      }
+
       // Arrow keys nudge all selected unlocked items
       const st = e.shiftKey ? 10 : NUDGE;
       const d = (
@@ -137,6 +176,7 @@ export function EditorStage() {
   const longName = useApp((s) => s.longName);
   const pastN = useApp((s) => s.past.length);
   const futureN = useApp((s) => s.future.length);
+  const notice = useApp((s) => s.notice);
   const { set, select, undo, redo, go } = useApp.getState();
   const ref = useRef<HTMLDivElement>(null);
   const [, force] = useState(0);
@@ -158,17 +198,47 @@ export function EditorStage() {
         : design.detected
       : null;
 
+  // Context menu trigger
+  const handleContextMenu = (e: React.MouseEvent, itemId: string | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const k = page.w / rect.width;
+    const px = (e.clientX - rect.left) * k;
+    const py = (e.clientY - rect.top) * k;
+    const s = useApp.getState();
+    if (itemId) {
+      if (!s.selIds.includes(itemId)) {
+        s.select([itemId]);
+      }
+      s.openCtx({ x: e.clientX, y: e.clientY, target: 'item', px, py });
+    } else {
+      s.openCtx({ x: e.clientX, y: e.clientY, target: 'canvas', px, py });
+    }
+  };
+
   // Item interaction handler (Move or Resize)
   const down = (id: string, mode: 'move' | 'size') => (e: React.PointerEvent) => {
     const s = useApp.getState();
     if (s.clean) return;
     const it = s.design.items.find((i) => i.id === id);
-    if (!it || it.locked || it.hidden || !ref.current) return;
+    if (!it || it.hidden || !ref.current) return;
 
     e.stopPropagation();
     e.preventDefault();
 
     const isAdditive = e.shiftKey || e.ctrlKey || e.metaKey || s.multiMode;
+
+    // Locked items can be selected, but cannot be dragged or resized
+    if (it.locked) {
+      if (isAdditive) {
+        s.select(nextSelection(s.selIds, id, true));
+      } else {
+        s.select([id]);
+      }
+      return;
+    }
 
     if (mode === 'move' && isAdditive) {
       // Toggle item in selection and do not start drag
@@ -453,7 +523,12 @@ export function EditorStage() {
       {/* Selection Toolbar Bar */}
       <SelectionBar />
 
-      <div className="editor" ref={ref} onPointerDown={onCanvasDown}>
+      <div
+        className="editor"
+        ref={ref}
+        onPointerDown={onCanvasDown}
+        onContextMenu={(e) => handleContextMenu(e, null)}
+      >
         <CertView design={design} values={sampleValues(design, longName)}>
           {!clean
             ? items.map((it) => {
@@ -462,17 +537,23 @@ export function EditorStage() {
                 const isSel = selIds.includes(it.id);
 
                 if (it.locked) {
-                  // A selected locked item shows a non-interactive dashed outline
-                  if (isSel) {
-                    return (
-                      <div
-                        key={it.id}
-                        className="hit locked sel"
-                        style={itemBox(it, page)}
-                      />
-                    );
-                  }
-                  return null;
+                  return (
+                    <div
+                      key={it.id}
+                      className={`hit locked${isSel ? ' sel' : ''}`}
+                      style={itemBox(it, page)}
+                      onPointerDown={down(it.id, 'move')}
+                      onContextMenu={(e) => handleContextMenu(e, it.id)}
+                    >
+                      {isSel && (
+                        <div className="locked-badge" title="Locked element (unlock via toolbar)">
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M8 1a4 4 0 00-4 4v2H3v8h10V7h-1V5a4 4 0 00-4-4zm-2 4a2 2 0 114 0v2H6V5zm2 5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" />
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+                  );
                 }
 
                 const frame =
@@ -493,6 +574,7 @@ export function EditorStage() {
                     className={cls}
                     style={itemBox(it, page)}
                     onPointerDown={frame ? undefined : down(it.id, 'move')}
+                    onContextMenu={(e) => handleContextMenu(e, it.id)}
                   >
                     {frame
                       ? (['t', 'b', 'l', 'r'] as const).map((s) => (
@@ -500,6 +582,7 @@ export function EditorStage() {
                             key={s}
                             className={`edge ${s}`}
                             onPointerDown={down(it.id, 'move')}
+                            onContextMenu={(e) => handleContextMenu(e, it.id)}
                           />
                         ))
                       : null}
@@ -577,10 +660,26 @@ export function EditorStage() {
         </CertView>
       </div>
       <div className="stage-hint">
-        {clean
-          ? 'Preview: this is how the printed certificate will look.'
-          : 'Arrow keys nudge · Hold Ctrl to move without snapping · Hold Alt to see distances · Ctrl+Z undoes'}
+        <span>
+          {clean
+            ? 'Preview: this is how the printed certificate will look.'
+            : 'Arrow keys nudge · Hold Ctrl to move without snapping · Hold Alt to see distances · Ctrl+Z undoes'}
+        </span>
+        {!clean && (
+          <button
+            type="button"
+            className="stage-hint-link"
+            onClick={() => useApp.getState().setHelp(true)}
+          >
+            Keyboard Shortcuts (?)
+          </button>
+        )}
       </div>
+
+      <ContextMenu />
+      <ShortcutsHelp />
+
+      {notice && <div className="editor-notice">{notice}</div>}
     </section>
   );
 }

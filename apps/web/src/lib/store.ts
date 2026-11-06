@@ -6,7 +6,7 @@ import {
   type ColumnMap, type Design, type FieldItem, type Item, type Row, type TextStyle,
   type Guide, type GapMark,
   alignDeltas, distributeDeltas, reorderItems, moveLayer as reorderLayer, itemBounds, unionBox,
-  snapTargets, snapMove,
+  snapTargets, snapMove, cloneItems,
   type AlignMode, type LayerOp,
 } from '@siescoms/certificate';
 import type { JobResult, UploadInfo } from './api';
@@ -63,6 +63,11 @@ interface State {
   saveState: 'idle' | 'saving' | 'saved' | 'error';
   past: Design[];
   future: Design[];
+  // Clipboard, context menu & shortcuts
+  clipboard: { items: Item[]; pastes: number } | null;
+  ctx: { x: number; y: number; target: 'item' | 'canvas'; px: number; py: number } | null;
+  helpOpen: boolean;
+  notice: string | null;
   // Recipients
   recipMode: 'single' | 'list';
   manualPeople: ManualPerson[];
@@ -105,6 +110,14 @@ interface Actions {
   removeMany: (ids: string[]) => void;
   dup: (id: string) => void;
   dupMany: (ids: string[]) => void;
+  copy: () => void;
+  cut: () => void;
+  paste: (at?: { px: number; py: number }) => void;
+  duplicateSelection: () => void;
+  openCtx: (ctx: { x: number; y: number; target: 'item' | 'canvas'; px: number; py: number }) => void;
+  closeCtx: () => void;
+  setHelp: (open: boolean) => void;
+  setNotice: (msg: string | null) => void;
   setLocked: (ids: string[], value: boolean) => void;
   setHidden: (ids: string[], value: boolean) => void;
   alignSelection: (mode: AlignMode) => void;
@@ -133,6 +146,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   upload: { status: 'idle', pct: 0, phase: 'upload', fileName: '', error: '', info: null, pageIndex: 0 },
   designId: null, design: DEFAULT_DESIGN, selIds: [], sel: null, multiMode: false, clean: false, snap: EMPTY_SNAP, longName: false, triedLong: false, layersOpen: false,
   saveState: 'idle', past: [], future: [],
+  clipboard: null, ctx: null, helpOpen: false, notice: null,
   recipMode: 'single', manualPeople: [{ id: '1', values: {}, email: '' }], single: {}, singleEmail: '', rows: [], headers: [], map: {}, emailCol: '', prevIdx: 0, dataName: '', dataNote: '', listBusy: false, listError: '',
   delivery: 'download', fmt: 'zip', baseName: 'symposium_certificates', sender: 'system', smtp: { host: '', port: '587', user: '', pass: '' },
   smtpTest: null, smtpMsg: '',
@@ -142,7 +156,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
 
   set: (p) => set(p as never),
   select: (ids) => set({ selIds: ids, sel: ids.length === 1 ? ids[0] : null }),
-  go: (n) => set((s) => ({ step: n, maxStep: (Math.max(s.maxStep, n) as Step), sel: null, selIds: [], snap: EMPTY_SNAP })),
+  go: (n) => set((s) => ({ step: n, maxStep: (Math.max(s.maxStep, n) as Step), sel: null, selIds: [], snap: EMPTY_SNAP, ctx: null, helpOpen: false })),
   setSnap: (next) => {
     const cur = get().snap;
     if (JSON.stringify(cur) !== JSON.stringify(next)) {
@@ -173,24 +187,64 @@ export const useApp = create<State & Actions>()((set, get) => ({
     const idSet = new Set(ids);
     const toDup = design.items.filter((i) => idSet.has(i.id) && !i.locked);
     if (toDup.length === 0) return;
-    const copies: Item[] = [];
-    let curItems = [...design.items];
-    for (const it of toDup) {
-      const c = { ...it, id: newId(), x: it.x + 14, y: it.y + 14 } as Item;
-      if (c.kind === 'field') {
-        c.sample = false;
-        c.style = { ...c.style };
-        if (c.type !== 'custom_text') {
-          c.key = freeKey({ ...design, items: curItems }, c.type);
-          c.label = `${it.label} copy`;
-        }
-      }
-      if (c.kind === 'image') c.campus = false;
-      copies.push(c);
-      curItems.push(c);
+    if (design.items.length + toDup.length > 500) {
+      get().setNotice('Maximum 500 items per certificate');
+      return;
     }
+    const copies = cloneItems(toDup, design, 14, newId);
     get().edit((d) => ({ ...d, items: [...d.items, ...copies] }));
     get().select(copies.map((c) => c.id));
+  },
+  copy: () => {
+    const { design, selIds } = get();
+    const idSet = new Set(selIds);
+    const selected = design.items.filter((i) => idSet.has(i.id) && !i.hidden);
+    if (selected.length === 0) return;
+    set({ clipboard: { items: structuredClone(selected), pastes: 0 } });
+  },
+  cut: () => {
+    const { design, selIds } = get();
+    const idSet = new Set(selIds);
+    const selected = design.items.filter((i) => idSet.has(i.id) && !i.locked && !i.hidden);
+    if (selected.length === 0) return;
+    set({ clipboard: { items: structuredClone(selected), pastes: 0 } });
+    get().removeMany(selIds);
+  },
+  paste: (at) => {
+    const { clipboard, design } = get();
+    if (!clipboard || clipboard.items.length === 0) return;
+    if (design.items.length + clipboard.items.length > 500) {
+      get().setNotice('Maximum 500 items per certificate');
+      return;
+    }
+    let clones: Item[];
+    if (at) {
+      const bounds = unionBox(clipboard.items.map(itemBounds));
+      const dx = Math.round(at.px - (bounds.x + bounds.w / 2));
+      const dy = Math.round(at.py - (bounds.y + bounds.h / 2));
+      clones = cloneItems(clipboard.items, design, { dx, dy }, newId);
+    } else {
+      const offset = (clipboard.pastes + 1) * 10;
+      clones = cloneItems(clipboard.items, design, offset, newId);
+    }
+    set({ clipboard: { ...clipboard, pastes: clipboard.pastes + 1 } });
+    get().edit((d) => ({ ...d, items: [...d.items, ...clones] }));
+    get().select(clones.map((c) => c.id));
+  },
+  duplicateSelection: () => {
+    const { selIds } = get();
+    get().dupMany(selIds);
+  },
+  openCtx: (ctx) => set({ ctx }),
+  closeCtx: () => set({ ctx: null }),
+  setHelp: (open) => set({ helpOpen: open }),
+  setNotice: (msg) => {
+    set({ notice: msg });
+    if (msg) {
+      setTimeout(() => {
+        if (get().notice === msg) set({ notice: null });
+      }, 3000);
+    }
   },
   setLocked: (ids, value) => {
     const idSet = new Set(ids);
