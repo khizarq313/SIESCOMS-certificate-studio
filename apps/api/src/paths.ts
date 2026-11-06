@@ -7,6 +7,9 @@ function findPkgDir(): string {
   const candidates = [
     // 1. Local copy inside apps/api
     path.resolve(process.cwd()),
+    path.resolve(process.cwd(), 'apps/api'),
+    path.resolve(process.cwd(), 'public'),
+    path.resolve(process.cwd(), 'public/static'),
     path.resolve(baseDir, '..'),
     // 2. Monorepo packages/certificate directory
     path.resolve(baseDir, '../../packages/certificate'),

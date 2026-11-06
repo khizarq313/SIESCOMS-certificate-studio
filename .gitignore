@@ -17,6 +17,7 @@ apps/web/.next/
 
 # Build artifacts & logs
 dist/
+!apps/api/dist/
 build/
 apps/api/assets/
 apps/api/fonts/

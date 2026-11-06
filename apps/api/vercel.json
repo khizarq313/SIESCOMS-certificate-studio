@@ -1,7 +1,7 @@
 {
   "functions": {
-    "api/index.ts": {
-      "includeFiles": "assets/**, fonts/**, fonts.css, public/**"
+    "api/**": {
+      "includeFiles": "dist/**, assets/**, fonts/**, fonts.css, public/**"
     }
   },
   "rewrites": [

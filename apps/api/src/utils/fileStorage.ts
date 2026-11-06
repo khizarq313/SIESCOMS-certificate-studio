@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { Readable } from 'node:stream';
 import { GridFSBucket } from 'mongodb';
 import { getDb } from '../storage/db';
@@ -7,7 +8,10 @@ import { getDb } from '../storage/db';
 const baseDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 const isVercel = Boolean(process.env.VERCEL);
 export const UPLOADS_ROOT =
-  process.env.UPLOADS_DIR || (isVercel ? '/tmp/siescoms-uploads' : path.resolve(baseDir, '../../uploads'));
+  process.env.UPLOADS_DIR ||
+  (isVercel
+    ? (process.platform === 'win32' ? path.join(os.tmpdir(), 'siescoms-uploads') : '/tmp/siescoms-uploads')
+    : path.resolve(baseDir, '../../uploads'));
 /** Uploaded certificate backgrounds, signatures and logos. */
 export const FILES_DIR = path.join(UPLOADS_ROOT, 'files');
 /** Finished PDFs and ZIPs, deleted after a day. */

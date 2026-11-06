@@ -1,7 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import * as esbuild from 'esbuild';
 
-// Locate packages/certificate
+console.log('==> Starting SIESCOMS API Production Build Pipeline...');
+
+// 1. Locate packages/certificate static assets and fonts
 const candidates = [
   path.resolve(process.cwd(), '../../packages/certificate'),
   path.resolve(process.cwd(), '../packages/certificate'),
@@ -14,7 +17,7 @@ const rootPkg = candidates.find(
 );
 
 if (rootPkg) {
-  console.log(`✓ Found certificate package at ${rootPkg}`);
+  console.log(`✓ Located certificate package at: ${rootPkg}`);
 
   // Copy assets and fonts to local and public directories
   const copies = [
@@ -45,10 +48,74 @@ if (rootPkg) {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.copyFileSync(fontsCssSrc, dest);
     }
-    console.log('✓ Copied fonts.css');
+    console.log('✓ Synchronized fonts.css to root and public distributions');
   }
 } else {
-  console.warn('⚠ Could not locate packages/certificate static assets');
+  console.warn('⚠ Could not locate external packages/certificate directory; skipping asset copy');
 }
 
-console.log('✓ SIESCOMS API build assets and fonts ready for Vercel.');
+// 2. Prepare dist directory
+const outdir = path.resolve(process.cwd(), 'dist');
+if (!fs.existsSync(outdir)) {
+  fs.mkdirSync(outdir, { recursive: true });
+}
+
+// Clean up any test artifacts if present
+const testBundle = path.join(outdir, 'test-bundle.js');
+if (fs.existsSync(testBundle)) {
+  try { fs.rmSync(testBundle, { force: true }); } catch {}
+}
+
+// 3. Bundle API application using esbuild
+const entryPoint = path.resolve(process.cwd(), 'src/index.ts');
+const bundleOut = path.resolve(outdir, 'index.js');
+
+console.log(`✓ Bundling API entrypoint with esbuild: ${entryPoint} -> ${bundleOut}`);
+
+try {
+  await esbuild.build({
+    entryPoints: [entryPoint],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node20',
+    outfile: bundleOut,
+    packages: 'external',
+    sourcemap: true,
+    logLevel: 'warning',
+  });
+  const stat = fs.statSync(bundleOut);
+  console.log(`✓ Production bundle generated successfully (${(stat.size / 1024).toFixed(1)} KB)`);
+} catch (err) {
+  console.error('❌ esbuild bundling failed:', err);
+  process.exit(1);
+}
+
+// 4. Ensure Vercel Serverless Function entry point imports generated output
+const apiDir = path.resolve(process.cwd(), 'api');
+if (!fs.existsSync(apiDir)) {
+  fs.mkdirSync(apiDir, { recursive: true });
+}
+
+const apiIndexJs = path.join(apiDir, 'index.js');
+const apiIndexJsContent = `import app from '../dist/index.js';
+
+export default function handler(req, res) {
+  return app(req, res);
+}
+`;
+fs.writeFileSync(apiIndexJs, apiIndexJsContent);
+
+const apiIndexTs = path.join(apiDir, 'index.ts');
+const apiIndexTsContent = `import type { Request, Response } from 'express';
+// @ts-ignore - dist/index.js is created during build
+import app from '../dist/index.js';
+
+export default function handler(req: Request, res: Response) {
+  return app(req, res);
+}
+`;
+fs.writeFileSync(apiIndexTs, apiIndexTsContent);
+
+console.log('✓ Vercel function entrypoints configured to import generated output (../dist/index.js)');
+console.log('✓ SIESCOMS API build pipeline completed successfully.');
