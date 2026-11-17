@@ -58,6 +58,7 @@ export function DeliveryStep() {
   const R = useRecipients();
   const [mail, setMail] = useState<MailConfig | null>(null);
   const [startErr, setStartErr] = useState('');
+  const [filter, setFilter] = useState<'all' | 'success' | 'failed'>('all');
   useEffect(() => { api.get<MailConfig>('/api/email/config').then(setMail, () => {}); }, []);
   useJobPolling(s.run?.jobId ?? null);
 
@@ -105,6 +106,11 @@ export function DeliveryStep() {
 
   const okN = run ? run.results.filter((x) => x.ok).length : 0;
   const failN = run ? run.results.length - okN : 0;
+  const filteredResults = run ? run.results.filter((r) => {
+    if (filter === 'success') return r.ok;
+    if (filter === 'failed') return !r.ok;
+    return true;
+  }) : [];
   const systemFrom = mail?.systemConfigured ? mail.systemFrom : mail?.testMode ? 'Not set up yet · test mode' : 'Not set up yet';
   const mailFrom = s.sender === 'smtp' ? s.smtp.user || 'you@siescoms.edu' : `SIES College of Management Studies${mail?.systemFrom ? ` <${mail.systemFrom.replace(/^.*<|>.*$/g, '')}>` : ''}`;
   const chips = textFields(R.design).filter((i) => i.type !== 'custom_text');
@@ -232,9 +238,29 @@ export function DeliveryStep() {
               {working ? <button type="button" className="btn btn-ghost btn-xs" style={{ alignSelf: 'flex-start' }} onClick={cancel}>Stop</button> : null}
               {run.finished ? (
                 <>
-                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 14 }}>
-                    <span style={{ color: 'var(--ok)', fontWeight: 500 }}>{okN} {run.kind === 'email' ? (run.testOnly ? 'sent to the test inbox' : 'delivered') : okN === 1 ? 'certificate created' : 'certificates created'}</span>
-                    {failN > 0 ? <span style={{ color: 'var(--bad)', fontWeight: 500 }}>{failN} failed</span> : null}
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 14, alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={() => setFilter('success')}
+                      style={{
+                        background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                        color: 'var(--ok)', fontWeight: 600, textDecoration: filter === 'success' ? 'underline' : 'none'
+                      }}
+                    >
+                      ✓ {okN} {run.kind === 'email' ? (run.testOnly ? 'sent to the test inbox' : 'delivered') : okN === 1 ? 'certificate created' : 'certificates created'}
+                    </button>
+                    {failN > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setFilter('failed')}
+                        style={{
+                          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                          color: 'var(--bad)', fontWeight: 600, textDecoration: filter === 'failed' ? 'underline' : 'none'
+                        }}
+                      >
+                        ✕ {failN} failed (click to filter)
+                      </button>
+                    ) : null}
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     {run.kind === 'download' && run.fileName && !run.err && !run.cancelled ? <a className="btn btn-primary" style={{ height: 44, fontSize: 14 }} href={`/api/jobs/${run.jobId}/file`} download>Download {run.fileName}</a> : null}
@@ -246,20 +272,116 @@ export function DeliveryStep() {
                 </>
               ) : null}
             </div>
+            {run.results.length > 0 ? (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 24px', background: '#FAF7F0', borderBottom: '1px solid var(--line-2)',
+                flexWrap: 'wrap', gap: 8
+              }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: 4 }}>
+                    Filter:
+                  </span>
+                  <button
+                    type="button"
+                    className="chip small"
+                    style={{
+                      background: filter === 'all' ? 'var(--ink)' : '#fff',
+                      color: filter === 'all' ? '#fff' : 'var(--ink)',
+                      borderColor: filter === 'all' ? 'var(--ink)' : 'var(--line-3)',
+                      fontWeight: filter === 'all' ? 600 : 400,
+                    }}
+                    onClick={() => setFilter('all')}
+                  >
+                    All ({run.results.length})
+                  </button>
+                  <button
+                    type="button"
+                    className="chip small"
+                    style={{
+                      background: filter === 'success' ? 'var(--ok-bg)' : '#fff',
+                      color: 'var(--ok)',
+                      borderColor: filter === 'success' ? 'var(--ok-line)' : 'var(--line-3)',
+                      fontWeight: filter === 'success' ? 600 : 400,
+                    }}
+                    onClick={() => setFilter('success')}
+                  >
+                    ✓ {run.kind === 'email' ? 'Sent' : 'Done'} ({okN})
+                  </button>
+                  <button
+                    type="button"
+                    className="chip small"
+                    style={{
+                      background: filter === 'failed' ? 'var(--bad-bg)' : '#fff',
+                      color: 'var(--bad)',
+                      borderColor: filter === 'failed' ? 'var(--bad-line)' : 'var(--line-3)',
+                      fontWeight: filter === 'failed' ? 600 : 400,
+                    }}
+                    onClick={() => setFilter('failed')}
+                  >
+                    ✕ Failed ({failN})
+                  </button>
+                </div>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  Showing {filteredResults.length} of {run.results.length}
+                </span>
+              </div>
+            ) : null}
             <div className="run-list">
-              {run.results.map((r, i) => (
-                <motion.div
-                  key={r.i}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.2, delay: Math.min(i * 0.02, 0.25) }}
-                  className="run-item"
-                >
-                  <b>{r.name}</b>
-                  <span title={r.detail}>{r.previewUrl ? <a href={r.previewUrl} target="_blank" rel="noreferrer">Preview · {r.detail}</a> : r.detail}</span>
-                  <span className={`pill${r.ok ? '' : ' bad'}`}>{run.kind === 'email' ? (r.ok ? 'Sent' : 'Failed') : r.ok ? 'Done' : 'Failed'}</span>
-                </motion.div>
-              ))}
+              {filteredResults.length === 0 ? (
+                <div style={{ padding: '36px 20px', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+                  {filter === 'failed'
+                    ? '✓ No failed recipients! All were processed successfully.'
+                    : filter === 'success'
+                    ? 'No successful recipients yet.'
+                    : 'No recipients processed yet.'}
+                </div>
+              ) : (
+                filteredResults.map((r, i) => (
+                  <motion.div
+                    key={r.i}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.2, delay: Math.min(i * 0.02, 0.25) }}
+                    className="run-item"
+                    style={{
+                      background: !r.ok ? '#FFF8F7' : undefined,
+                      alignItems: !r.ok ? 'flex-start' : 'center',
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+                      <b style={{ color: !r.ok ? 'var(--bad)' : undefined }}>{r.name}</b>
+                      {!r.ok ? (
+                        <span style={{ fontSize: 11, color: 'var(--muted-2)' }}>Recipient #{r.i + 1}</span>
+                      ) : null}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                      {r.previewUrl ? (
+                        <a href={r.previewUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
+                          Preview · {r.detail}
+                        </a>
+                      ) : !r.ok ? (
+                        <div style={{
+                          color: 'var(--bad)', fontSize: 12, lineHeight: 1.45,
+                          background: 'rgba(239, 68, 68, 0.06)', padding: '5px 10px',
+                          borderRadius: 6, border: '1px solid rgba(239, 68, 68, 0.15)',
+                          wordBreak: 'break-word', whiteSpace: 'normal'
+                        }}>
+                          <b>Reason: </b>
+                          <span>{r.detail}</span>
+                        </div>
+                      ) : (
+                        <span title={r.detail} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.detail}
+                        </span>
+                      )}
+                    </div>
+                    <span className={`pill${r.ok ? '' : ' bad'}`}>
+                      {run.kind === 'email' ? (r.ok ? 'Sent' : 'Failed') : r.ok ? 'Done' : 'Failed'}
+                    </span>
+                  </motion.div>
+                ))
+              )}
             </div>
           </div>
         )}
