@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import {
   FIELD_PRESETS,
@@ -30,12 +30,92 @@ export function ItemPopover({ item: it }: { item: Item }) {
   const design = useApp((s) => s.design);
   const { updItem, updStyle, record, dup, remove } = useApp.getState();
   const fileRef = useRef<HTMLInputElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const [imgBusy, setImgBusy] = useState(false);
   const [imgErr, setImgErr] = useState('');
   const [studioFile, setStudioFile] = useState<File | null>(null);
   const [moreTextOpts, setMoreTextOpts] = useState(false);
   const { w: W, h: H } = design.page;
   const id = it.id;
+
+  // Close the popover on clicking anywhere outside of it (clicking and not dragging)
+  useEffect(() => {
+    let startPos: { x: number; y: number } | null = null;
+    let downInside = false;
+
+    const onPointerDown = (e: PointerEvent) => {
+      // If clicking inside the popover itself or active modals, ignore
+      if (popoverRef.current && popoverRef.current.contains(e.target as Node)) {
+        downInside = true;
+        startPos = null;
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('.img-studio-backdrop') || target?.closest('.img-studio-modal') || target?.closest('.ctx-menu')) {
+        downInside = true;
+        startPos = null;
+        return;
+      }
+
+      downInside = false;
+      startPos = { x: e.clientX, y: e.clientY };
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (downInside || !startPos) return;
+
+      const dist = Math.hypot(e.clientX - startPos.x, e.clientY - startPos.y);
+      startPos = null;
+
+      // If user dragged (moved 5px or more), do not treat it as a click
+      if (dist >= 5) return;
+
+      const target = e.target as HTMLElement | null;
+
+      // If released inside the popover itself, do not close
+      if (popoverRef.current && popoverRef.current.contains(target as Node)) {
+        return;
+      }
+
+      // If released inside modals or context menu, do not close
+      if (target?.closest('.img-studio-backdrop') || target?.closest('.img-studio-modal') || target?.closest('.ctx-menu')) {
+        return;
+      }
+
+      // If released inside the SelectionBar toolbar, let SelectionBar handle its buttons
+      if (target?.closest('.selection-bar') || target?.closest('.selection-bar-slot')) {
+        return;
+      }
+
+      // If clicked on an item on the canvas (.hit), that item's down() handler handles selecting it
+      if (target?.closest('.hit')) {
+        return;
+      }
+
+      // If clicked on interactive buttons or inputs in the top bar or sidebar, let them execute
+      if (
+        target?.closest('.stage-bar button') ||
+        target?.closest('.stage-bar input') ||
+        target?.closest('.side button') ||
+        target?.closest('.side input') ||
+        target?.closest('.side select') ||
+        target?.closest('.side label')
+      ) {
+        return;
+      }
+
+      // User clicked outside the popped-up window: close it by clearing selection
+      useApp.getState().select([]);
+    };
+
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('pointerup', onPointerUp, true);
+
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('pointerup', onPointerUp, true);
+    };
+  }, []);
 
   // Typing in a box records one undo step when you start, not one per letter.
   const live = (p: Partial<Item>) => updItem(id, p, false);
@@ -143,6 +223,7 @@ export function ItemPopover({ item: it }: { item: Item }) {
 
   return (
     <motion.div
+      ref={popoverRef}
       className="pop"
       style={pop}
       initial={{ opacity: 0, scale: 0.95, y: -4 }}

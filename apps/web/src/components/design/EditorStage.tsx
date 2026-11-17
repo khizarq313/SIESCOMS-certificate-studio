@@ -463,8 +463,38 @@ export function EditorStage() {
     window.addEventListener('pointercancel', onUp);
   };
 
+  // Clicking on empty space of the stage background outside certificate deselects
+  const onStageDown = (e: React.PointerEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (
+      target?.closest('.editor') ||
+      target?.closest('.stage-bar') ||
+      target?.closest('.selection-bar-slot') ||
+      target?.closest('.selection-bar') ||
+      target?.closest('.stage-hint')
+    ) {
+      return;
+    }
+    const sx = e.clientX;
+    const sy = e.clientY;
+
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      const dist = Math.hypot(ev.clientX - sx, ev.clientY - sy);
+      if (dist < 5) {
+        const s = useApp.getState();
+        if (s.selIds.length > 0 && !s.multiMode) {
+          s.select([]);
+        }
+      }
+    };
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+
   return (
-    <section className="stage">
+    <section className="stage" onPointerDown={onStageDown}>
       <div className="stage-bar">
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <button
